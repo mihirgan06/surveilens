@@ -16,6 +16,7 @@
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow-models/mobilenet": "^2.1.1",
     "@tensorflow/tfjs": "^4.22.0",
+    "@vapi-ai/server-sdk": "^0.10.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
