@@ -1,6 +1,6 @@
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import '@tensorflow/tfjs';
-import { Detection, SuspiciousActivity } from '../types/detection';
+import type { Detection, SuspiciousActivity } from '../types/detection';
 
 let model: cocoSsd.ObjectDetection | null = null;
 

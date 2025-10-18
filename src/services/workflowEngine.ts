@@ -343,11 +343,6 @@ Respond with ONLY "YES" or "NO".`;
   /**
    * Get all nodes connected to a trigger node (legacy method, kept for compatibility)
    */
-  private getConnectedNodes(startNodeId: string, nodes: Node[], edges: Edge[]): Node[] {
-    const levels = this.getNodesByLevel(startNodeId, nodes, edges);
-    return levels.flat();
-  }
-
   /**
    * Action implementations
    */
@@ -408,8 +403,39 @@ Respond with ONLY "YES" or "NO".`;
   }
 
   private async sendSlack(config: any, event: DetectionEvent): Promise<void> {
-    console.log('💬 Slack message would be sent:', config);
-    // TODO: Implement Slack webhook
+    console.log('💬 sendSlack called with config:', config);
+    console.log('💬 sendSlack called with event:', event);
+    
+    if (!config.configured || !config.channel) {
+      console.log('⚠️ Slack not configured - configured:', config.configured, 'channel:', config.channel);
+      return;
+    }
+
+    const message = this.replaceVariables(config.message, event);
+    const channel = config.channel;
+
+    console.log('💬 Sending Slack message to channel:', channel);
+    console.log('💬 Message content:', message);
+
+    try {
+      const response = await fetch('http://localhost:3001/slack/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeId: config.nodeId,
+          channel,
+          message
+        })
+      });
+
+      if (response.ok) {
+        console.log('💬 Slack message sent successfully');
+      } else {
+        console.error('❌ Failed to send Slack message:', await response.text());
+      }
+    } catch (error) {
+      console.error('❌ Slack error:', error);
+    }
   }
 
   private async sendSMS(config: any, event: DetectionEvent): Promise<void> {
@@ -461,22 +487,22 @@ Respond with ONLY "YES" or "NO".`;
     }
   }
 
-  private async makeVAPICall(config: any, event: DetectionEvent): Promise<void> {
+  private async makeVAPICall(config: any, _event: DetectionEvent): Promise<void> {
     console.log('📞 VAPI call would be made:', config);
     // TODO: Implement VAPI voice call
   }
 
-  private async callWebhook(config: any, event: DetectionEvent): Promise<void> {
+  private async callWebhook(config: any, _event: DetectionEvent): Promise<void> {
     console.log('🔗 Webhook would be called:', config);
     // TODO: Implement webhook POST
   }
 
-  private async logToDatabase(config: any, event: DetectionEvent): Promise<void> {
+  private async logToDatabase(_config: any, event: DetectionEvent): Promise<void> {
     console.log('💾 Database log:', event);
     // TODO: Implement database logging
   }
 
-  private async saveScreenshot(config: any, event: DetectionEvent): Promise<void> {
+  private async saveScreenshot(config: any, _event: DetectionEvent): Promise<void> {
     console.log('📸 Screenshot would be saved:', config);
     // TODO: Implement screenshot capture
   }

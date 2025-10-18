@@ -1,9 +1,9 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Upload, Play, Pause, RotateCcw, FileVideo, AlertTriangle, Brain, Eye } from 'lucide-react';
-import { detectObjects, analyzeSuspiciousActivity, detectShoplifting } from '../utils/detection';
-import { Detection, SuspiciousActivity, Alert } from '../types/detection';
-import { analyzeSceneWithContext, SceneAnalysis, defaultWorkflowRules, checkWorkflowTriggers } from '../services/openai';
-import { config, isOpenAIConfigured } from '../config';
+import { detectObjects } from '../utils/detection';
+import type { Detection, Alert } from '../types/detection';
+import { analyzeSceneWithContext, type SceneAnalysis, defaultWorkflowRules, checkWorkflowTriggers } from '../services/openai';
+import { config } from '../config';
 
 interface VideoUploadProps {
   onAlert: (alert: Alert) => void;
@@ -19,11 +19,9 @@ export const VideoUpload: React.FC<VideoUploadProps> = ({ onAlert }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [detections, setDetections] = useState<Detection[]>([]);
-  const [detectionHistory, setDetectionHistory] = useState<Detection[][]>([]);
-  const [allActivities, setAllActivities] = useState<SuspiciousActivity[]>([]);
   const [processedFrames, setProcessedFrames] = useState(0);
   const [totalFrames, setTotalFrames] = useState(0);
-  const animationIdRef = useRef<number>();
+  const animationIdRef = useRef<number | undefined>(undefined);
   
   // OpenAI Analysis States
   const [aiAnalysis, setAiAnalysis] = useState<SceneAnalysis | null>(null);
@@ -43,8 +41,7 @@ export const VideoUpload: React.FC<VideoUploadProps> = ({ onAlert }) => {
       }
       // Reset states
       setDetections([]);
-      setDetectionHistory([]);
-      setAllActivities([]);
+      setDetections([]);
       setProcessedFrames(0);
       setTotalFrames(0);
       setIsPlaying(false);
@@ -152,12 +149,6 @@ export const VideoUpload: React.FC<VideoUploadProps> = ({ onAlert }) => {
         const newDetections = await detectObjects(video);
         setDetections(newDetections);
 
-        // Update detection history
-        setDetectionHistory(prev => {
-          const updated = [...prev, newDetections];
-          return updated.slice(-30);
-        });
-
         // Draw bounding boxes
         newDetections.forEach(detection => {
           const [x, y, width, height] = detection.bbox;
@@ -220,8 +211,7 @@ export const VideoUpload: React.FC<VideoUploadProps> = ({ onAlert }) => {
       setIsPlaying(false);
       setIsProcessing(false);
       setDetections([]);
-      setDetectionHistory([]);
-      setAllActivities([]);
+      setDetections([]);
       setProcessedFrames(0);
       setAiAnalysis(null);
       setAiAnalysisHistory([]);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Info, XCircle, Clock, X } from 'lucide-react';
-import { Alert } from '../types/detection';
+import type { Alert } from '../types/detection';
 
 interface AlertListProps {
   alerts: Alert[];

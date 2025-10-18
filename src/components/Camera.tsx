@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Camera as CameraIcon, CameraOff, AlertTriangle } from 'lucide-react';
 import { detectObjects, analyzeSuspiciousActivity, detectShoplifting } from '../utils/detection';
-import { Detection, SuspiciousActivity, Alert } from '../types/detection';
+import type { Detection, SuspiciousActivity, Alert } from '../types/detection';
 
 interface CameraProps {
   onAlert: (alert: Alert) => void;
@@ -16,7 +16,7 @@ export const Camera: React.FC<CameraProps> = ({ onAlert }) => {
   const [suspiciousActivities, setSuspiciousActivities] = useState<SuspiciousActivity[]>([]);
   const [error, setError] = useState<string>('');
   const streamRef = useRef<MediaStream | null>(null);
-  const animationIdRef = useRef<number>();
+  const animationIdRef = useRef<number | undefined>(undefined);
 
   const startCamera = async () => {
     try {
