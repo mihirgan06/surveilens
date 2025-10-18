@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { detectionEngine } from './services/detectionEngine';
 import type { DetectedObject, DetectionEvent, SceneContext } from './types/detectionTypes';
 import WorkflowBuilder from './components/WorkflowBuilder';
@@ -31,7 +31,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoUrlRef = useRef<string>('');
-  const detectionLoopRef = useRef<number>();
+  const detectionLoopRef = useRef<number | undefined>();
 
   const hasApiKey = !!import.meta.env.VITE_OPENAI_API_KEY && 
                     import.meta.env.VITE_OPENAI_API_KEY !== 'your_openai_api_key_here';
@@ -174,51 +174,88 @@ function App() {
 
   // Track which events have already triggered workflows
   const triggeredEventsRef = useRef<Set<number>>(new Set());
+  const workflowNodesRef = useRef<Node[]>([]);
+  const workflowEdgesRef = useRef<Edge[]>([]);
+
+  // Keep refs updated
+  useEffect(() => {
+    workflowNodesRef.current = workflowNodes;
+    workflowEdgesRef.current = workflowEdges;
+  }, [workflowNodes, workflowEdges]);
 
   // Check if any workflow triggers match the current events
-  const checkWorkflowTriggers = async (events: DetectionEvent[]) => {
-    const triggerNodes = workflowNodes.filter(n => n.data.nodeType === 'trigger');
-    console.log('🔍 Checking workflows:', triggerNodes.length, 'triggers,', events.length, 'events');
+  const checkWorkflowTriggers = useCallback(async (events: DetectionEvent[], currentSceneContext: SceneContext | null) => {
+    const nodes = workflowNodesRef.current;
+    const edges = workflowEdgesRef.current;
+    
+    const triggerNodes = nodes.filter(n => n.data.nodeType === 'trigger');
+    
+    console.log('═══════════════════════════════════════');
+    console.log('🔍 WORKFLOW TRIGGER CHECK');
+    console.log('Trigger nodes:', triggerNodes.length);
+    console.log('Events to check:', events.length);
+    console.log('Event types:', events.map(e => e.type));
+    console.log('Scene context available:', !!currentSceneContext);
+    console.log('═══════════════════════════════════════');
     
     if (triggerNodes.length === 0) {
       console.log('⚠️ No trigger nodes in workflow');
       return;
     }
     
+    if (events.length === 0) {
+      console.log('⚠️ No events to check');
+      return;
+    }
+    
     for (const triggerNode of triggerNodes) {
-      console.log('🎯 Checking trigger node:', triggerNode.data.label, 'type:', triggerNode.data.blockType);
+      console.log('\n🎯 Checking trigger:', triggerNode.data.label, '(', triggerNode.data.blockType, ')');
       
-      const isTriggered = await workflowEngine.checkTrigger(triggerNode, events, sceneContext);
-      
-      if (isTriggered) {
-        const latestEvent = events[events.length - 1];
+      try {
+        const isTriggered = await workflowEngine.checkTrigger(triggerNode, events, currentSceneContext);
         
-        // Check if we've already triggered for this event
-        if (triggeredEventsRef.current.has(latestEvent.timestamp)) {
-          console.log('⏭️ Already triggered for this event, skipping');
-          continue;
+        if (isTriggered) {
+          const latestEvent = events[events.length - 1];
+          
+          // Check if we've already triggered for this event
+          if (triggeredEventsRef.current.has(latestEvent.timestamp)) {
+            console.log('⏭️ Already triggered for this event, skipping');
+            continue;
+          }
+          
+          triggeredEventsRef.current.add(latestEvent.timestamp);
+          
+          // Clean up old timestamps (keep last 100)
+          if (triggeredEventsRef.current.size > 100) {
+            const timestamps = Array.from(triggeredEventsRef.current).sort((a, b) => a - b);
+            triggeredEventsRef.current = new Set(timestamps.slice(-100));
+          }
+          
+          console.log('🚨🚨🚨 WORKFLOW TRIGGERED! 🚨🚨🚨');
+          console.log('Trigger:', triggerNode.data.label);
+          console.log('Event:', latestEvent.type);
+          console.log('Description:', latestEvent.description);
+          
+          // Show toast notification
+          addToast({
+            type: 'workflow',
+            title: `Workflow Triggered: ${triggerNode.data.label}`,
+            description: latestEvent.description
+          });
+          
+          // Execute workflow
+          await workflowEngine.executeWorkflow(
+            nodes,
+            edges,
+            triggerNode.id,
+            latestEvent
+          );
         }
-        
-        triggeredEventsRef.current.add(latestEvent.timestamp);
-        console.log('🚨 Workflow triggered:', triggerNode.data.label, 'by event:', latestEvent.type);
-        
-        // Show toast notification
-        addToast({
-          type: 'workflow',
-          title: `Workflow Triggered: ${triggerNode.data.label}`,
-          description: latestEvent.description
-        });
-        
-        // Execute workflow
-        await workflowEngine.executeWorkflow(
-          workflowNodes,
-          workflowEdges,
-          triggerNode.id,
-          latestEvent
-        );
+      } catch (error) {
+        console.error('❌ Error checking trigger:', error);
       }
     }
-  };
+  }, [addToast]);
 
   // Subscribe to workflow execution updates
   useEffect(() => {
@@ -293,14 +330,13 @@ function App() {
       const events = detectionEngine.getRecentEvents(30);
       setRecentEvents(events);
 
-      // Check workflow triggers for new events
-      console.log('📊 Workflow state:', workflowNodes.length, 'nodes,', workflowEdges.length, 'edges');
-      if (events.length > 0 && workflowNodes.length > 0) {
-        console.log('✅ Calling checkWorkflowTriggers with', events.length, 'events');
-        checkWorkflowTriggers(events);
-      } else {
-        if (events.length === 0) console.log('⚠️ No events to check');
-        if (workflowNodes.length === 0) console.log('⚠️ No workflow nodes');
+      // Check workflow triggers for new events - always check if we have triggers
+      if (workflowNodesRef.current.length > 0) {
+        const triggerCount = workflowNodesRef.current.filter(n => n.data.nodeType === 'trigger').length;
+        if (triggerCount > 0 && events.length > 0) {
+          console.log('✅ Calling checkWorkflowTriggers with', events.length, 'events');
+          checkWorkflowTriggers(events, sceneContext);
+        }
       }
 
     } catch (err: any) {

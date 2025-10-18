@@ -81,7 +81,7 @@ function CustomNode({ data, id }: { data: any; id: string }) {
           </Badge>
         </div>
         <div className="flex gap-0.5">
-          {data.nodeType === 'action' && (
+          {(data.nodeType === 'action' || (data.nodeType === 'trigger' && data.blockType === 'custom_event')) && (
             <button
               onClick={handleSettings}
               className="nodrag nopan bg-slate-700/60 hover:bg-slate-600 rounded p-0.5 transition-colors cursor-pointer"
@@ -165,6 +165,9 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     body: '',
     authenticated: false
   });
+  const [showCustomTriggerConfig, setShowCustomTriggerConfig] = useState(false);
+  const [customTriggerNodeId, setCustomTriggerNodeId] = useState<string>('');
+  const [customTriggerCondition, setCustomTriggerCondition] = useState('');
   const { project } = useReactFlow();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
@@ -246,11 +249,14 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       console.log('📧 Opening Gmail config');
       setGmailConfigNodeId(nodeId);
       setGmailConfig(config || { to: '', subject: '', body: '', authenticated: false });
-      console.log('🚀 Setting showGmailConfig to TRUE');
       setShowGmailConfig(true);
-      console.log('✨ showGmailConfig should now be true');
+    } else if (blockType === 'custom_event') {
+      console.log('🎨 Opening Custom Trigger config');
+      setCustomTriggerNodeId(nodeId);
+      setCustomTriggerCondition(config?.condition || '');
+      setShowCustomTriggerConfig(true);
     } else {
-      console.log('⚠️ Not a Gmail block, blockType is:', blockType);
+      console.log('⚠️ No configuration UI for blockType:', blockType);
     }
   }, []);
 
@@ -352,6 +358,17 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       )
     );
     setShowGmailConfig(false);
+  };
+
+  const saveCustomTriggerConfig = () => {
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === customTriggerNodeId
+          ? { ...node, data: { ...node.data, config: { condition: customTriggerCondition } } }
+          : node
+      )
+    );
+    setShowCustomTriggerConfig(false);
   };
 
   return (
@@ -575,6 +592,81 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
                 </Button>
                 <Button 
                   onClick={() => setShowGmailConfig(false)} 
+                  variant="ghost" 
+                  className="flex-1"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Custom Trigger Configuration Modal */}
+      {showCustomTriggerConfig && (
+        <div 
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+          onClick={() => setShowCustomTriggerConfig(false)}
+        >
+          <Card 
+            className="w-[500px] max-h-[80vh] overflow-y-auto border-green-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader className="border-b border-green-500/20 pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Zap className="h-4 w-4 text-green-400" />
+                  Configure Custom Trigger
+                </CardTitle>
+                <button
+                  onClick={() => setShowCustomTriggerConfig(false)}
+                  className="text-slate-400 hover:text-white transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4 pb-4">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-300">Trigger Condition</label>
+                <p className="text-xs text-slate-400">
+                  Describe what you want to detect. The AI will match this condition against the video analysis.
+                </p>
+                <textarea
+                  value={customTriggerCondition}
+                  onChange={(e) => setCustomTriggerCondition(e.target.value)}
+                  placeholder="Example: someone stealing something, person running away, car parked illegally, etc."
+                  rows={4}
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500 resize-none"
+                />
+              </div>
+
+              <div className="bg-slate-950/50 border border-slate-700 rounded p-3 space-y-2">
+                <div className="text-xs font-medium text-slate-300">Examples:</div>
+                <div className="space-y-1 text-xs text-slate-400">
+                  <div>• "Someone stealing merchandise"</div>
+                  <div>• "Person running away quickly"</div>
+                  <div>• "Multiple people fighting"</div>
+                  <div>• "Someone leaving a bag unattended"</div>
+                  <div>• "Person wearing a mask inside"</div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button 
+                  onClick={saveCustomTriggerConfig} 
+                  className="flex-1" 
+                  size="sm"
+                  disabled={!customTriggerCondition.trim()}
+                >
+                  Save
+                </Button>
+                <Button 
+                  onClick={() => setShowCustomTriggerConfig(false)} 
                   variant="ghost" 
                   className="flex-1"
                   size="sm"

@@ -154,10 +154,15 @@ Return JSON:
   private generateEvents(context: SceneContext) {
     const events: DetectionEvent[] = [];
 
+    console.log('🎯 Generating events from AI analysis:', {
+      detectedEvents: context.detectedEvents,
+      suspiciousActivities: context.suspiciousActivities
+    });
+
     // Generate events for each detected activity
     context.detectedEvents.forEach(eventType => {
-      events.push({
-        type: eventType,
+      const event = {
+        type: eventType.toUpperCase(), // Normalize to uppercase
         confidence: 0.8,
         description: context.description,
         timestamp: Date.now(),
@@ -166,13 +171,15 @@ Return JSON:
           peopleCount: context.peopleCount,
           activities: context.activities
         }
-      });
+      };
+      console.log('📝 Created event from detectedEvents:', event.type);
+      events.push(event);
     });
 
     // Generate events for suspicious activities
     context.suspiciousActivities.forEach(activity => {
-      events.push({
-        type: activity.type,
+      const event = {
+        type: activity.type.toUpperCase(), // Normalize to uppercase
         confidence: activity.confidence,
         description: activity.description,
         timestamp: Date.now(),
@@ -180,8 +187,12 @@ Return JSON:
         metadata: {
           peopleCount: context.peopleCount
         }
-      });
+      };
+      console.log('🚨 Created event from suspicious activity:', event.type, 'confidence:', event.confidence);
+      events.push(event);
     });
+
+    console.log('✅ Total events generated:', events.length, events.map(e => e.type));
 
     // Add to event history
     this.eventHistory.push(...events);

@@ -29,44 +29,81 @@ class WorkflowEngine {
   ): Promise<boolean> {
     const triggerType = triggerNode.data.blockType;
     
-    console.log('🔍 Checking trigger:', triggerType, 'against events:', events);
+    console.log('🔍 Checking trigger:', triggerType, 'against', events.length, 'events');
+    console.log('📋 Event types present:', events.map(e => e.type));
 
-    // Predefined triggers (fast, no API calls)
-    switch (triggerType) {
-      case 'person_detected':
-      case 'person_entered':
-        return events.some(e => e.type === 'PERSON_ENTERED');
-      
-      case 'person_exited':
-        return events.some(e => e.type === 'PERSON_EXITED');
-      
-      case 'robbery_detected':
-        return events.some(e => e.type === 'ROBBERY_DETECTED');
-      
-      case 'fight_detected':
-        return events.some(e => e.type === 'FIGHT_DETECTED');
-      
-      case 'suspicious_activity':
-        return events.some(e => e.type === 'SUSPICIOUS_ACTIVITY');
-      
-      case 'motion_detected':
-        return events.some(e => e.type === 'MOTION_DETECTED');
-      
-      case 'object_detected':
-        return events.length > 0; // Any detection
-      
-      case 'custom_event':
-        // Custom trigger - use LLM to match
-        return await this.checkCustomTrigger(
-          triggerNode.data.config?.condition || '',
-          events,
-          sceneContext
-        );
-      
-      default:
-        console.warn('⚠️ Unknown trigger type:', triggerType);
-        return false;
+    // For custom triggers, use LLM matching
+    if (triggerType === 'custom_event') {
+      console.log('🎨 Custom trigger detected, using LLM matching');
+      return await this.checkCustomTrigger(
+        triggerNode.data.config?.condition || '',
+        events,
+        sceneContext
+      );
     }
+
+    // Normalize trigger type to uppercase for matching
+    const normalizedTrigger = triggerType.toUpperCase();
+    
+    // Check if any event matches this trigger
+    const matched = events.some(e => {
+      const eventType = e.type.toUpperCase();
+      
+      // Direct match
+      if (eventType === normalizedTrigger) {
+        console.log('✅ Direct match:', eventType, '===', normalizedTrigger);
+        return true;
+      }
+      
+      // Handle aliases and variations
+      if (triggerType === 'person_detected' || triggerType === 'person_entered') {
+        const personMatch = eventType.includes('PERSON') && (eventType.includes('ENTERED') || eventType.includes('DETECTED'));
+        if (personMatch) {
+          console.log('✅ Person match:', eventType);
+          return true;
+        }
+      }
+      
+      if (triggerType === 'fight_detected') {
+        const fightMatch = eventType.includes('FIGHT') || eventType.includes('VIOLENCE');
+        if (fightMatch) {
+          console.log('✅ Fight match:', eventType);
+          return true;
+        }
+      }
+      
+      if (triggerType === 'robbery_detected') {
+        const robberyMatch = eventType.includes('ROBBERY') || eventType.includes('BREAK');
+        if (robberyMatch) {
+          console.log('✅ Robbery match:', eventType);
+          return true;
+        }
+      }
+      
+      if (triggerType === 'suspicious_activity') {
+        const suspiciousMatch = eventType.includes('SUSPICIOUS') || eventType.includes('LOITERING') || eventType.includes('SHOPLIFTING');
+        if (suspiciousMatch) {
+          console.log('✅ Suspicious activity match:', eventType);
+          return true;
+        }
+      }
+      
+      if (triggerType === 'object_detected') {
+        // Any event counts as object detected
+        console.log('✅ Object detected (any event):', eventType);
+        return true;
+      }
+      
+      return false;
+    });
+
+    if (matched) {
+      console.log('🎯 Trigger MATCHED:', triggerType);
+    } else {
+      console.log('❌ No match for trigger:', triggerType);
+    }
+
+    return matched;
   }
 
   /**
@@ -77,18 +114,47 @@ class WorkflowEngine {
     events: DetectionEvent[],
     sceneContext: SceneContext | null
   ): Promise<boolean> {
-    if (!condition || !sceneContext) return false;
+    if (!condition) {
+      console.log('⚠️ Custom trigger has no condition defined');
+      return false;
+    }
+
+    if (!sceneContext) {
+      console.log('⚠️ No scene context available for custom trigger');
+      return false;
+    }
+
+    console.log('🎨 Checking custom trigger condition:', condition);
 
     try {
-      const prompt = `You are a surveillance system evaluating trigger conditions.
+      const eventSummary = events.length > 0 
+        ? events.map(e => `- ${e.type} (${(e.confidence * 100).toFixed(0)}% confidence): ${e.description}`).join('\n')
+        : 'No specific events detected';
 
-Current Scene: ${sceneContext.description}
-Recent Events: ${events.map(e => `- ${e.type}: ${e.description}`).join('\n')}
+      const prompt = `You are a surveillance AI evaluating if a custom trigger condition matches the current scene.
 
-Trigger Condition: "${condition}"
+CURRENT SCENE DESCRIPTION:
+${sceneContext.description}
 
-Does the current scene/events match this trigger condition?
+DETECTED EVENTS:
+${eventSummary}
+
+PEOPLE COUNT: ${sceneContext.peopleCount}
+ACTIVITIES: ${sceneContext.activities.join(', ')}
+
+USER'S CUSTOM TRIGGER CONDITION:
+"${condition}"
+
+TASK: Determine if the current scene/events match the user's trigger condition. Be flexible with interpretation - if the scene is semantically similar or related to the condition, it should match.
+
+Examples:
+- If condition is "someone stealing" and scene shows "person concealing items", that's a MATCH
+- If condition is "fight" and scene shows "physical altercation", that's a MATCH
+- If condition is "person enters" and scene shows "new person detected", that's a MATCH
+
 Respond with ONLY "YES" or "NO".`;
+
+      console.log('🤖 Sending custom trigger check to AI...');
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -98,7 +164,11 @@ Respond with ONLY "YES" or "NO".`;
       });
 
       const answer = response.choices[0].message.content?.trim().toUpperCase();
-      return answer === 'YES';
+      const matched = answer === 'YES';
+      
+      console.log(matched ? '✅ Custom trigger MATCHED' : '❌ Custom trigger did NOT match');
+      
+      return matched;
     } catch (error) {
       console.error('❌ Error checking custom trigger:', error);
       return false;
@@ -202,6 +272,9 @@ Respond with ONLY "YES" or "NO".`;
    * Get all nodes connected to a trigger node
    */
   private getConnectedNodes(startNodeId: string, nodes: Node[], edges: Edge[]): Node[] {
+    console.log('🔗 Finding nodes connected to:', startNodeId);
+    console.log('📊 Total nodes:', nodes.length, 'Total edges:', edges.length);
+    
     const connected: Node[] = [];
     const visited = new Set<string>();
     const queue = [startNodeId];
@@ -213,16 +286,21 @@ Respond with ONLY "YES" or "NO".`;
 
       // Find edges from this node
       const outgoingEdges = edges.filter(e => e.source === currentId);
+      console.log(`📍 Node ${currentId} has ${outgoingEdges.length} outgoing edges`);
       
       for (const edge of outgoingEdges) {
         const targetNode = nodes.find(n => n.id === edge.target);
-        if (targetNode && targetNode.data.nodeType !== 'trigger') {
-          connected.push(targetNode);
-          queue.push(edge.target);
+        if (targetNode) {
+          console.log(`  ➡️ Connected to: ${targetNode.data.label} (${targetNode.data.blockType})`);
+          if (targetNode.data.nodeType !== 'trigger') {
+            connected.push(targetNode);
+            queue.push(edge.target);
+          }
         }
       }
     }
 
+    console.log('✅ Found', connected.length, 'connected nodes:', connected.map(n => n.data.label));
     return connected;
   }
 
