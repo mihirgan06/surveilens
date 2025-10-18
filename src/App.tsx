@@ -31,6 +31,13 @@ const saveWorkflowToStorage = (videoId: string, nodes: Node[], edges: Edge[]) =>
     workflows[videoId] = { nodes: cleanNodes, edges, timestamp: Date.now() };
     localStorage.setItem('surveilens_workflows', JSON.stringify(workflows));
     console.log('💾 Workflow saved for:', videoId, '| Nodes:', nodes.length, '| Edges:', edges.length);
+    
+    // Debug: Log config for each node
+    cleanNodes.forEach(node => {
+      if (node.data?.config) {
+        console.log(`  📦 Node ${node.id} (${node.data.blockType}) config:`, node.data.config);
+      }
+    });
   } catch (err) {
     console.error('❌ Failed to save workflow:', err);
   }
@@ -42,6 +49,14 @@ const loadWorkflowFromStorage = (videoId: string): { nodes: Node[]; edges: Edge[
     const workflow = workflows[videoId];
     if (workflow) {
       console.log('📂 Workflow loaded for:', videoId, '| Nodes:', workflow.nodes.length, '| Edges:', workflow.edges.length);
+      
+      // Debug: Log config for each loaded node
+      workflow.nodes.forEach((node: any) => {
+        if (node.data?.config) {
+          console.log(`  📦 Loaded node ${node.id} (${node.data.blockType}) config:`, node.data.config);
+        }
+      });
+      
       // Note: Icon and callbacks will be re-added by WorkflowBuilder when creating nodes
       return { nodes: workflow.nodes, edges: workflow.edges };
     } else {
