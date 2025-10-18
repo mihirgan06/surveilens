@@ -186,14 +186,17 @@ function App() {
     console.log('🗑️ Clearing triggered events cache...');
     triggeredEventsRef.current.clear();
     triggerCooldownRef.current.clear();
-    console.log('✅ Triggered events cache cleared!');
+    console.log('✅ Triggered events cache cleared! You can trigger workflows again.');
   };
 
   // Expose clearTriggeredEvents globally for console access
   useEffect(() => {
     (window as any).clearTriggeredEvents = clearTriggeredEvents;
+    (window as any).clearCooldown = clearTriggeredEvents; // Alias for easier typing
+    console.log('🔧 Debug functions available: clearTriggeredEvents() or clearCooldown()');
     return () => {
       delete (window as any).clearTriggeredEvents;
+      delete (window as any).clearCooldown;
     };
   }, []);
 

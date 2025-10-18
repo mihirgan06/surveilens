@@ -206,12 +206,22 @@ Respond with ONLY "YES" or "NO".`;
     try {
       // Find connected nodes
       const connectedNodes = this.getConnectedNodes(triggerNodeId, nodes, edges);
+      console.log(`📦 Will execute ${connectedNodes.length} action nodes`);
       
-      for (const node of connectedNodes) {
+      for (let i = 0; i < connectedNodes.length; i++) {
+        const node = connectedNodes[i];
+        console.log(`\n🔄 [${i + 1}/${connectedNodes.length}] Executing action: ${node.data.label} (${node.data.blockType})`);
+        
         execution.activeNodes = [node.id];
         this.notifyExecutionUpdate(execution);
         
-        await this.executeNode(node, event);
+        try {
+          await this.executeNode(node, event);
+          console.log(`✅ [${i + 1}/${connectedNodes.length}] Completed: ${node.data.label}`);
+        } catch (error) {
+          console.error(`❌ [${i + 1}/${connectedNodes.length}] Failed: ${node.data.label}`, error);
+          // Continue with other nodes even if one fails
+        }
         
         // Wait a bit for visual feedback
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -221,7 +231,8 @@ Respond with ONLY "YES" or "NO".`;
       execution.activeNodes = [];
       this.notifyExecutionUpdate(execution);
       
-      console.log('✅ Workflow completed:', workflowId);
+      console.log('\n✅ Workflow completed:', workflowId);
+      console.log(`📊 Executed ${connectedNodes.length} total actions\n`);
     } catch (error) {
       console.error('❌ Workflow execution failed:', error);
       execution.status = 'failed';
