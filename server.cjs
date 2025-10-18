@@ -226,6 +226,64 @@ app.get('/slack/status/:nodeId', (req, res) => {
   });
 });
 
+// Test endpoint to manually trigger Slack workflow
+app.post('/test/slack-workflow', async (req, res) => {
+  console.log('🧪 Testing Slack workflow integration...');
+  
+  const testConfig = {
+    configured: true,
+    channel: '#all-surveilens',
+    message: '🧪 TEST WORKFLOW: {{event_type}} - {{event_description}} at {{timestamp}}',
+    nodeId: 'test-workflow-node'
+  };
+  
+  const testEvent = {
+    type: 'PERSON_DETECTED',
+    description: 'Person walking through parking lot',
+    timestamp: Date.now(),
+    confidence: 0.85,
+    objects: [],
+    metadata: {}
+  };
+  
+  try {
+    const message = testConfig.message
+      .replace(/\{\{event_type\}\}/g, testEvent.type)
+      .replace(/\{\{event_description\}\}/g, testEvent.description)
+      .replace(/\{\{timestamp\}\}/g, new Date(testEvent.timestamp).toLocaleString())
+      .replace(/\{\{confidence\}\}/g, Math.round(testEvent.confidence * 100) + '%');
+    
+    console.log('🧪 Generated message:', message);
+    
+    const slackMessage = {
+      channel: testConfig.channel,
+      text: message
+    };
+    
+    const response = await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(slackMessage)
+    });
+    
+    const result = await response.json();
+    
+    if (result.ok) {
+      console.log('✅ Test Slack workflow message sent successfully');
+      res.json({ success: true, message: 'Test workflow Slack message sent!', ts: result.ts });
+    } else {
+      console.error('❌ Test Slack API error:', result.error);
+      res.status(400).json({ error: `Slack API error: ${result.error}` });
+    }
+  } catch (error) {
+    console.error('❌ Test Slack error:', error);
+    res.status(500).json({ error: 'Failed to send test Slack message', details: error.message });
+  }
+});
+
 const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`🚀 OAuth server running on http://localhost:${PORT}`);

@@ -31,6 +31,7 @@ class WorkflowEngine {
     
     console.log('🔍 Checking trigger:', triggerType, 'against', events.length, 'events');
     console.log('📋 Event types present:', events.map(e => e.type));
+    console.log('🎯 Trigger node:', triggerNode.data.label);
 
     // For custom triggers, use LLM matching
     if (triggerType === 'custom_event') {
