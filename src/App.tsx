@@ -146,16 +146,16 @@ function App() {
 
       // Load saved workflow if exists
       const savedWorkflow = loadWorkflowFromStorage(videoId);
-
+      
       // Set video ID BEFORE setting workflow nodes/edges
       setCurrentVideoId(videoId);
-
-      if (savedWorkflow) {
-        console.log('✅ Restoring saved workflow');
+      
+      if (savedWorkflow && savedWorkflow.nodes.length > 0) {
+        console.log('✅ Restoring saved workflow with', savedWorkflow.nodes.length, 'nodes');
         setWorkflowNodes(savedWorkflow.nodes);
         setWorkflowEdges(savedWorkflow.edges);
       } else {
-        console.log('🆕 Starting with empty workflow');
+        console.log('🆕 Starting with empty workflow (saved nodes:', savedWorkflow?.nodes?.length || 0, ')');
         setWorkflowNodes([]);
         setWorkflowEdges([]);
       }
@@ -212,16 +212,16 @@ function App() {
 
       // Load saved workflow if exists
       const savedWorkflow = loadWorkflowFromStorage(videoId);
-
+      
       // Set video ID BEFORE setting workflow nodes/edges
       setCurrentVideoId(videoId);
-
-      if (savedWorkflow) {
-        console.log('✅ Restoring saved workflow');
+      
+      if (savedWorkflow && savedWorkflow.nodes.length > 0) {
+        console.log('✅ Restoring saved workflow with', savedWorkflow.nodes.length, 'nodes');
         setWorkflowNodes(savedWorkflow.nodes);
         setWorkflowEdges(savedWorkflow.edges);
       } else {
-        console.log('🆕 Starting with empty workflow');
+        console.log('🆕 Starting with empty workflow (saved nodes:', savedWorkflow?.nodes?.length || 0, ')');
         setWorkflowNodes([]);
         setWorkflowEdges([]);
       }
@@ -260,6 +260,33 @@ function App() {
     }
   }, [workflowNodes, workflowEdges, currentVideoId]);
 
+  // Create refs to hold the latest workflow state for cleanup
+  const workflowNodesRef = useRef(workflowNodes);
+  const workflowEdgesRef = useRef(workflowEdges);
+  const currentVideoIdRef = useRef(currentVideoId);
+  
+  // Update refs whenever state changes
+  useEffect(() => {
+    workflowNodesRef.current = workflowNodes;
+    workflowEdgesRef.current = workflowEdges;
+    currentVideoIdRef.current = currentVideoId;
+  }, [workflowNodes, workflowEdges, currentVideoId]);
+
+  // Save workflow when component unmounts (user navigates away)
+  useEffect(() => {
+    return () => {
+      const videoId = currentVideoIdRef.current;
+      const nodes = workflowNodesRef.current;
+      const edges = workflowEdgesRef.current;
+      
+      if (videoId) {
+        console.log('🚪 Component unmounting - saving workflow before leaving');
+        console.log('   VideoID:', videoId, '| Nodes:', nodes.length, '| Edges:', edges.length);
+        saveWorkflowToStorage(videoId, nodes, edges);
+      }
+    };
+  }, []);
+
   // Cleanup blob URLs on unmount to prevent memory leaks
   useEffect(() => {
     return () => {
@@ -290,16 +317,16 @@ function App() {
 
       // Load saved workflow if exists
       const savedWorkflow = loadWorkflowFromStorage(videoId);
-
+      
       // Set video ID BEFORE setting workflow nodes/edges
       setCurrentVideoId(videoId);
-
-      if (savedWorkflow) {
-        console.log('✅ Restoring saved workflow');
+      
+      if (savedWorkflow && savedWorkflow.nodes.length > 0) {
+        console.log('✅ Restoring saved workflow with', savedWorkflow.nodes.length, 'nodes');
         setWorkflowNodes(savedWorkflow.nodes);
         setWorkflowEdges(savedWorkflow.edges);
       } else {
-        console.log('🆕 Starting with empty workflow');
+        console.log('🆕 Starting with empty workflow (saved nodes:', savedWorkflow?.nodes?.length || 0, ')');
         setWorkflowNodes([]);
         setWorkflowEdges([]);
       }
