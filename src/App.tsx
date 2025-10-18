@@ -176,6 +176,26 @@ function App() {
   const triggeredEventsRef = useRef<Set<number>>(new Set());
   const workflowNodesRef = useRef<Node[]>([]);
   const workflowEdgesRef = useRef<Edge[]>([]);
+  
+  // Cooldown tracking: Map of triggerNodeId -> last trigger timestamp
+  const triggerCooldownRef = useRef<Map<string, number>>(new Map());
+  const TRIGGER_COOLDOWN_MS = 30000; // 30 second cooldown between triggers
+
+  // Function to clear triggered events (for debugging/testing)
+  const clearTriggeredEvents = () => {
+    console.log('🗑️ Clearing triggered events cache...');
+    triggeredEventsRef.current.clear();
+    triggerCooldownRef.current.clear();
+    console.log('✅ Triggered events cache cleared!');
+  };
+
+  // Expose clearTriggeredEvents globally for console access
+  useEffect(() => {
+    (window as any).clearTriggeredEvents = clearTriggeredEvents;
+    return () => {
+      delete (window as any).clearTriggeredEvents;
+    };
+  }, []);
 
   // Keep refs updated
   useEffect(() => {
@@ -217,19 +237,19 @@ function App() {
         if (isTriggered) {
           const latestEvent = events[events.length - 1];
           
-          // Check if we've already triggered for this event
-          if (triggeredEventsRef.current.has(latestEvent.timestamp)) {
-            console.log('⏭️ Already triggered for this event, skipping');
+          // Check cooldown: prevent same trigger from firing too frequently
+          const now = Date.now();
+          const lastTriggerTime = triggerCooldownRef.current.get(triggerNode.id) || 0;
+          const timeSinceLastTrigger = now - lastTriggerTime;
+          
+          if (timeSinceLastTrigger < TRIGGER_COOLDOWN_MS) {
+            const remainingCooldown = Math.ceil((TRIGGER_COOLDOWN_MS - timeSinceLastTrigger) / 1000);
+            console.log(`⏳ Trigger on cooldown (${remainingCooldown}s remaining), skipping`);
             continue;
           }
           
-          triggeredEventsRef.current.add(latestEvent.timestamp);
-          
-          // Clean up old timestamps (keep last 100)
-          if (triggeredEventsRef.current.size > 100) {
-            const timestamps = Array.from(triggeredEventsRef.current).sort((a, b) => a - b);
-            triggeredEventsRef.current = new Set(timestamps.slice(-100));
-          }
+          // Update cooldown timer
+          triggerCooldownRef.current.set(triggerNode.id, now);
           
           console.log('🚨🚨🚨 WORKFLOW TRIGGERED! 🚨🚨🚨');
           console.log('Trigger:', triggerNode.data.label);

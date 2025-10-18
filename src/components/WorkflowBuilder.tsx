@@ -207,7 +207,7 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       
       if (event.data.type === 'GMAIL_AUTH_SUCCESS') {
         console.log('✅ Gmail auth successful!');
-        setGmailConfig(prev => ({ ...prev, authenticated: true }));
+        setGmailConfig(prev => ({ ...prev, authenticated: true, nodeId: event.data.nodeId }));
       } else if (event.data.type === 'GMAIL_AUTH_ERROR') {
         console.error('❌ Gmail auth failed:', event.data.error);
         alert('Authentication failed: ' + event.data.error);
@@ -327,33 +327,45 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     setEdges([]);
   };
 
-  const handleGmailAuth = () => {
+  const handleGmailAuth = async () => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-    window.open(`${backendUrl}/auth/google?nodeId=${gmailConfigNodeId}`, '_blank', 'width=500,height=600');
     
-    // Listen for auth success
-    const checkAuth = setInterval(async () => {
-      try {
-        const res = await fetch(`${backendUrl}/gmail/status/${gmailConfigNodeId}`);
-        const data = await res.json();
-        if (data.authenticated) {
-          setGmailConfig(prev => ({ ...prev, authenticated: true }));
-          clearInterval(checkAuth);
+    try {
+      // First, get the auth URL from the backend
+      const res = await fetch(`${backendUrl}/auth/google?nodeId=${gmailConfigNodeId}`);
+      const data = await res.json();
+      
+      // Then open the Google OAuth URL in a popup
+      window.open(data.authUrl, '_blank', 'width=500,height=600');
+      
+      // Listen for auth success
+      const checkAuth = setInterval(async () => {
+        try {
+          const res = await fetch(`${backendUrl}/gmail/status/${gmailConfigNodeId}`);
+          const data = await res.json();
+          if (data.authenticated) {
+            setGmailConfig(prev => ({ ...prev, authenticated: true, nodeId: gmailConfigNodeId }));
+            clearInterval(checkAuth);
+          }
+        } catch (err) {
+          console.error('Auth check failed:', err);
         }
-      } catch (err) {
-        console.error('Auth check failed:', err);
-      }
-    }, 2000);
+      }, 2000);
 
-    // Stop checking after 2 minutes
-    setTimeout(() => clearInterval(checkAuth), 120000);
+      // Stop checking after 2 minutes
+      setTimeout(() => clearInterval(checkAuth), 120000);
+    } catch (err) {
+      console.error('Failed to get auth URL:', err);
+    }
   };
 
   const saveGmailConfig = () => {
+    // Save config with nodeId included
+    const configWithNodeId = { ...gmailConfig, nodeId: gmailConfigNodeId };
     setNodes((nds) =>
       nds.map((node) =>
         node.id === gmailConfigNodeId
-          ? { ...node, data: { ...node.data, config: gmailConfig } }
+          ? { ...node, data: { ...node.data, config: configWithNodeId } }
           : node
       )
     );

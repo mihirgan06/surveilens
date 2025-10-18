@@ -119,38 +119,42 @@ class WorkflowEngine {
       return false;
     }
 
-    if (!sceneContext) {
-      console.log('⚠️ No scene context available for custom trigger');
+    if (events.length === 0) {
+      console.log('⚠️ No events to check against custom trigger');
       return false;
     }
 
     console.log('🎨 Checking custom trigger condition:', condition);
 
     try {
-      const eventSummary = events.length > 0 
-        ? events.map(e => `- ${e.type} (${(e.confidence * 100).toFixed(0)}% confidence): ${e.description}`).join('\n')
-        : 'No specific events detected';
+      const eventSummary = events.map(e => 
+        `- ${e.type.replace(/_/g, ' ')} (${(e.confidence * 100).toFixed(0)}% confidence): ${e.description}`
+      ).join('\n');
 
-      const prompt = `You are a surveillance AI evaluating if a custom trigger condition matches the current scene.
+      // Build context string
+      let contextInfo = `DETECTED EVENTS:\n${eventSummary}`;
+      
+      if (sceneContext) {
+        contextInfo += `\n\nSCENE CONTEXT:\n`;
+        contextInfo += `Description: ${sceneContext.description}\n`;
+        contextInfo += `People Count: ${sceneContext.peopleCount}\n`;
+        contextInfo += `Activities: ${sceneContext.activities.join(', ')}`;
+      }
 
-CURRENT SCENE DESCRIPTION:
-${sceneContext.description}
+      const prompt = `You are a surveillance AI evaluating if a custom trigger condition matches detected events.
 
-DETECTED EVENTS:
-${eventSummary}
-
-PEOPLE COUNT: ${sceneContext.peopleCount}
-ACTIVITIES: ${sceneContext.activities.join(', ')}
+${contextInfo}
 
 USER'S CUSTOM TRIGGER CONDITION:
 "${condition}"
 
-TASK: Determine if the current scene/events match the user's trigger condition. Be flexible with interpretation - if the scene is semantically similar or related to the condition, it should match.
+TASK: Determine if the detected events or scene match the user's trigger condition. Be flexible with interpretation - if the events are semantically similar or related to the condition, it should match.
 
 Examples:
-- If condition is "someone stealing" and scene shows "person concealing items", that's a MATCH
-- If condition is "fight" and scene shows "physical altercation", that's a MATCH
-- If condition is "person enters" and scene shows "new person detected", that's a MATCH
+- If condition is "someone stealing" and events show "robbery detected" or "person concealing items", that's a MATCH
+- If condition is "fight" and events show "fighting detected" or "violence detected", that's a MATCH  
+- If condition is "person wearing mask" and events mention "masked individual", that's a MATCH
+- If condition is "person enters" and events show "person entered", that's a MATCH
 
 Respond with ONLY "YES" or "NO".`;
 
@@ -308,30 +312,55 @@ Respond with ONLY "YES" or "NO".`;
    * Action implementations
    */
   private async sendGmail(config: any, event: DetectionEvent): Promise<void> {
-    if (!config.authenticated || !config.to) {
-      console.log('⚠️ Gmail not configured');
+    console.log('📧 sendGmail called with config:', {
+      authenticated: config.authenticated,
+      to: config.to,
+      nodeId: config.nodeId,
+      hasSubject: !!config.subject,
+      hasBody: !!config.body
+    });
+    
+    if (!config.authenticated) {
+      console.error('❌ Gmail not authenticated! Please authenticate first.');
+      return;
+    }
+    
+    if (!config.to) {
+      console.error('❌ Gmail recipient not configured!');
       return;
     }
 
     const subject = this.replaceVariables(config.subject, event);
     const body = this.replaceVariables(config.body, event);
+    
+    console.log('📧 Sending email to:', config.to);
+    console.log('📧 Subject:', subject);
+    console.log('📧 Body:', body);
 
     try {
-      const response = await fetch('http://localhost:3001/api/send-email', {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const payload = {
+        nodeId: config.nodeId,
+        to: config.to,
+        subject,
+        body
+      };
+      
+      console.log('📧 Sending to backend:', `${backendUrl}/gmail/send`, payload);
+      
+      const response = await fetch(`${backendUrl}/gmail/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nodeId: config.nodeId,
-          to: config.to,
-          subject,
-          body
-        })
+        body: JSON.stringify(payload)
       });
 
+      const responseData = await response.text();
+      console.log('📧 Backend response:', response.status, responseData);
+
       if (response.ok) {
-        console.log('📧 Email sent successfully');
+        console.log('✅✅✅ Email sent successfully! ✅✅✅');
       } else {
-        console.error('❌ Failed to send email:', await response.text());
+        console.error('❌ Failed to send email. Status:', response.status, 'Response:', responseData);
       }
     } catch (error) {
       console.error('❌ Email error:', error);

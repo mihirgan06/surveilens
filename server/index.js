@@ -31,6 +31,7 @@ app.get('/auth/google', (req, res) => {
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/userinfo.email'
     ],
+    redirect_uri: 'http://localhost:3001/auth/google/callback',
     state: nodeId // Pass nodeId through state
   });
   
@@ -72,10 +73,19 @@ app.get('/auth/google/callback', async (req, res) => {
 app.post('/gmail/send', async (req, res) => {
   const { nodeId, to, subject, body } = req.body;
   
+  console.log('📧 Gmail send request received:');
+  console.log('  NodeId:', nodeId);
+  console.log('  To:', to);
+  console.log('  Subject:', subject);
+  console.log('  Available tokens for nodeIds:', Object.keys(userTokens));
+  
   const tokens = userTokens[nodeId];
   if (!tokens) {
+    console.error('❌ No tokens found for nodeId:', nodeId);
     return res.status(401).json({ error: 'Not authenticated. Please connect Gmail first.' });
   }
+  
+  console.log('✅ Tokens found for nodeId:', nodeId);
   
   try {
     oauth2Client.setCredentials(tokens);
