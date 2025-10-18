@@ -568,9 +568,52 @@ Respond with ONLY "YES" or "NO".`;
     }
   }
 
-  private async makeVAPICall(config: any, _event: DetectionEvent): Promise<void> {
-    console.log('📞 VAPI call would be made:', config);
-    // TODO: Implement VAPI voice call
+  private async makeVAPICall(config: any, event: DetectionEvent): Promise<void> {
+    console.log('📞 makeVAPICall called with config:', config);
+    console.log('📞 Config keys:', Object.keys(config || {}));
+    console.log('📞 Has phoneNumber?', !!config?.phoneNumber);
+    console.log('📞 Has message?', !!config?.message);
+    console.log('📞 Has voiceId?', !!config?.voiceId);
+    
+    if (!config || !config.phoneNumber) {
+      console.error('❌ ❌ ❌ VAPI BLOCK NOT CONFIGURED! ❌ ❌ ❌');
+      console.error('❌ Please click the settings icon (⚙️) on the VAPI Call block');
+      console.error('❌ Enter your phone number, message, and select a voice');
+      console.error('❌ Then click Save');
+      return;
+    }
+    
+    const message = this.replaceVariables(config.message, event);
+    const phoneNumber = config.phoneNumber;
+    const voiceId = config.voiceId || 'rachel';
+    
+    console.log('📞 Initiating VAPI call to:', phoneNumber);
+    console.log('📞 Message:', message);
+    console.log('📞 Voice:', voiceId);
+    
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${backendUrl}/vapi/call`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber,
+          message,
+          voiceId
+        })
+      });
+      
+      const responseData = await response.json();
+      
+      if (response.ok) {
+        console.log('✅✅✅ VAPI call initiated successfully! ✅✅✅');
+        console.log('Call ID:', responseData.callId);
+      } else {
+        console.error('❌ Failed to initiate VAPI call:', responseData.error);
+      }
+    } catch (error) {
+      console.error('❌ VAPI call error:', error);
+    }
   }
 
   private async callWebhook(config: any, _event: DetectionEvent): Promise<void> {

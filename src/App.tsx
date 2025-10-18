@@ -178,7 +178,7 @@ function App() {
   
   // Cooldown tracking: Map of triggerNodeId -> last trigger timestamp
   const triggerCooldownRef = useRef<Map<string, number>>(new Map());
-  const TRIGGER_COOLDOWN_MS = 30000; // 30 second cooldown between triggers
+  const TRIGGER_COOLDOWN_MS = 60000; // 60 second cooldown between triggers to prevent spam calls
 
   // Function to clear triggered events (for debugging/testing)
   const clearTriggeredEvents = () => {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import ReactFlow, {
   type Node,
   type Edge,
@@ -11,6 +11,7 @@ import ReactFlow, {
   Position,
   Handle,
   ReactFlowProvider,
+  ConnectionMode,
 } from 'reactflow';
 import { useNodesState, useEdgesState } from '@reactflow/core';
 import 'reactflow/dist/style.css';
@@ -36,6 +37,13 @@ function CustomNode({ data, id }: { data: any; id: string }) {
     e.preventDefault();
     e.stopPropagation();
     console.log('⚙️ Settings button clicked! Node ID:', id);
+    console.log('⚙️ Node data:', { 
+      blockType: data.blockType, 
+      nodeType: data.nodeType, 
+      label: data.label,
+      hasConfig: !!data.config,
+      hasOnSettings: !!data.onSettings
+    });
     if (data.onSettings) {
       console.log('✅ Calling onSettings handler with blockType:', data.blockType);
       data.onSettings(id, data.blockType, data.config);
@@ -138,7 +146,7 @@ const ACTION_BLOCKS = [
   { id: 'gmail', label: 'Send Gmail', icon: Mail, color: '#fca5a5' }, // Soft red
   { id: 'slack', label: 'Send Slack', icon: MessageCircle, color: '#c4b5fd' }, // Soft purple
   { id: 'sms', label: 'Send SMS', icon: MessageCircle, color: '#7dd3fc' }, // Soft blue
-  { id: 'vapi_call', label: 'VAPI Call', icon: Phone, color: '#c084fc' }, // Soft violet
+  { id: 'vapi_call', label: 'Call', icon: Phone, color: '#c084fc' }, // Soft violet
   { id: 'webhook', label: 'Webhook', icon: Webhook, color: '#fcd34d' }, // Soft yellow
   { id: 'database_log', label: 'Log to DB', icon: Database, color: '#86efac' }, // Soft green
   { id: 'save_screenshot', label: 'Screenshot', icon: Camera, color: '#93c5fd' }, // Soft blue
@@ -180,6 +188,14 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     to: '',
     body: ''
   });
+  const [showVapiConfig, setShowVapiConfig] = useState(false);
+  const [vapiConfigNodeId, setVapiConfigNodeId] = useState<string>('');
+  const [vapiConfig, setVapiConfig] = useState({
+    phoneNumber: '',
+    message: '',
+    voiceId: 'rachel'
+  });
+  const [availableVoices, setAvailableVoices] = useState<any[]>([]);
   const [showTimeConditionConfig, setShowTimeConditionConfig] = useState(false);
   const [timeConditionConfigNodeId, setTimeConditionConfigNodeId] = useState<string>('');
   const [timeConditionConfig, setTimeConditionConfig] = useState({
@@ -228,6 +244,13 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     console.log('🎯 customEventConfig:', customEventConfig);
   }, [showCustomEventConfig, customEventConfig]);
 
+  // Debug: Log when showVapiConfig changes
+  useEffect(() => {
+    console.log('📞 showVapiConfig state changed to:', showVapiConfig);
+    console.log('📞 vapiConfig:', vapiConfig);
+    console.log('📞 availableVoices:', availableVoices?.length || 0, 'voices');
+  }, [showVapiConfig, vapiConfig, availableVoices]);
+
   // Listen for OAuth callback messages
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -271,6 +294,60 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     [setEdges]
   );
 
+  // Track which edge is being dragged and if it was reconnected
+  const edgeUpdateSuccessful = useRef<boolean>(false);
+
+  const onEdgeUpdate = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      console.log('✅ Edge reconnected successfully');
+      edgeUpdateSuccessful.current = true;
+      
+      // Only update if we have valid source and target
+      if (!newConnection.source || !newConnection.target) {
+        console.log('❌ Invalid connection, will delete edge');
+        return;
+      }
+      
+      setEdges((eds) => {
+        const edgeIndex = eds.findIndex((e) => e.id === oldEdge.id);
+        if (edgeIndex !== -1) {
+          const updatedEdges = [...eds];
+          updatedEdges[edgeIndex] = {
+            ...oldEdge,
+            source: newConnection.source as string,
+            target: newConnection.target as string,
+            ...(newConnection.sourceHandle && { sourceHandle: newConnection.sourceHandle }),
+            ...(newConnection.targetHandle && { targetHandle: newConnection.targetHandle }),
+          };
+          return updatedEdges;
+        }
+        return eds;
+      });
+    },
+    [setEdges]
+  );
+
+  const onEdgeUpdateStart = useCallback((_: any, edge: Edge) => {
+    console.log('🎯 Edge drag started:', edge.id);
+    edgeUpdateSuccessful.current = false;
+  }, []);
+
+  const onEdgeUpdateEnd = useCallback(
+    (_: any, edge: Edge) => {
+      console.log('🎯 Edge drag ended. Was reconnected?', edgeUpdateSuccessful.current);
+      
+      // If edge wasn't successfully reconnected, delete it
+      if (!edgeUpdateSuccessful.current) {
+        console.log('❌ Edge dropped without reconnecting - deleting:', edge.id);
+        setEdges((eds) => eds.filter((e) => e.id !== edge.id));
+      }
+      
+      // Reset for next drag
+      edgeUpdateSuccessful.current = false;
+    },
+    [setEdges]
+  );
+
   const deleteNodeById = useCallback((nodeId: string) => {
     setNodes((nds) => nds.filter((n) => n.id !== nodeId));
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
@@ -278,7 +355,8 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
 
   const handleNodeSettings = useCallback((nodeId: string, blockType: string, config: any) => {
     console.log('🔧 Settings clicked for node:', nodeId, 'blockType:', blockType);
-
+    console.log('🔍 Config received:', config);
+    
     if (blockType === 'gmail') {
       console.log('📧 Opening Gmail config');
       setGmailConfigNodeId(nodeId);
@@ -291,6 +369,25 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       setSmsConfigNodeId(nodeId);
       setSmsConfig(config || { to: '', body: '' });
       setShowSmsConfig(true);
+    } else if (blockType === 'vapi_call') {
+      console.log('📞 Opening VAPI Call config');
+      console.log('📞 Setting vapiConfigNodeId to:', nodeId);
+      setVapiConfigNodeId(nodeId);
+      const vapiConfigToSet = config || { phoneNumber: '', message: '', voiceId: 'rachel' };
+      console.log('📞 Setting vapiConfig to:', vapiConfigToSet);
+      setVapiConfig(vapiConfigToSet);
+      console.log('📞 Setting showVapiConfig to TRUE');
+      setShowVapiConfig(true);
+      console.log('📞 VAPI modal should now appear!');
+      // Fetch available voices
+      console.log('📞 Fetching available voices...');
+      fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'}/vapi/voices`)
+        .then(res => res.json())
+        .then(data => {
+          console.log('📞 Voices fetched successfully:', data.voices?.length || 0, 'voices');
+          setAvailableVoices(data.voices || []);
+        })
+        .catch(err => console.error('❌ Failed to fetch voices:', err));
     } else if (blockType === 'slack') {
       console.log('💬 Opening Slack config');
       setSlackConfigNodeId(nodeId);
@@ -317,25 +414,25 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
   }, []);
 
   const addBlock = (
-    blockType: string,
-    blockLabel: string,
-    Icon: any,
+    blockType: string, 
+    blockLabel: string, 
+    Icon: any, 
     nodeType: 'trigger' | 'condition' | 'action',
     customColor?: string
   ) => {
     const colors = {
-      trigger: {
-        bg: 'linear-gradient(135deg, #6ee7b7 0%, #34d399 100%)',
+      trigger: { 
+        bg: 'linear-gradient(135deg, #6ee7b7 0%, #34d399 100%)', 
         border: '#6ee7b7',
         badge: 'TRIGGER'
       },
-      condition: {
-        bg: 'linear-gradient(135deg, #fcd34d 0%, #fbbf24 100%)',
+      condition: { 
+        bg: 'linear-gradient(135deg, #fcd34d 0%, #fbbf24 100%)', 
         border: '#fcd34d',
         badge: 'CONDITION'
       },
-      action: {
-        bg: customColor ? `linear-gradient(135deg, ${customColor}cc 0%, ${customColor}99 100%)` : 'linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%)',
+      action: { 
+        bg: customColor ? `linear-gradient(135deg, ${customColor}cc 0%, ${customColor}99 100%)` : 'linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%)', 
         border: customColor ? `${customColor}cc` : '#93c5fd',
         badge: 'ACTION'
       }
@@ -383,7 +480,7 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     };
 
     const position = findEmptyPosition();
-
+    
     const newNode: Node = {
       id: `${blockType}_${Date.now()}`,
       type: 'custom',
@@ -441,27 +538,27 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
         // Open in a popup window instead of the current window
         const authWindow = window.open(data.authUrl, 'gmail-auth', 'width=500,height=600,menubar=no,toolbar=no,location=no,status=no');
         console.log('🪟 Opened auth popup window');
-        
-        // Listen for auth success
-        const checkAuth = setInterval(async () => {
-          try {
-            const res = await fetch(`${backendUrl}/gmail/status/${gmailConfigNodeId}`);
-            const data = await res.json();
-            if (data.authenticated) {
+    
+    // Listen for auth success
+    const checkAuth = setInterval(async () => {
+      try {
+        const res = await fetch(`${backendUrl}/gmail/status/${gmailConfigNodeId}`);
+        const data = await res.json();
+        if (data.authenticated) {
               console.log('✅ Gmail authenticated successfully!');
               setGmailConfig(prev => ({ ...prev, authenticated: true, nodeId: gmailConfigNodeId }));
-              clearInterval(checkAuth);
+          clearInterval(checkAuth);
               if (authWindow && !authWindow.closed) {
                 authWindow.close();
               }
-            }
-          } catch (err) {
-            console.error('Auth check failed:', err);
-          }
-        }, 2000);
-        
-        // Stop checking after 2 minutes
-        setTimeout(() => clearInterval(checkAuth), 120000);
+        }
+      } catch (err) {
+        console.error('Auth check failed:', err);
+      }
+    }, 2000);
+
+    // Stop checking after 2 minutes
+    setTimeout(() => clearInterval(checkAuth), 120000);
       } else {
         console.error('❌ No authUrl in response:', data);
       }
@@ -654,8 +751,15 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onEdgeUpdate={onEdgeUpdate}
+            onEdgeUpdateStart={onEdgeUpdateStart}
+            onEdgeUpdateEnd={onEdgeUpdateEnd}
             onNodeClick={() => {}}
             nodeTypes={nodeTypes}
+            connectionMode={ConnectionMode.Loose}
+            edgesFocusable={true}
+            edgesUpdatable={true}
+            deleteKeyCode="Backspace"
             fitView
             panOnScroll
             panOnScrollSpeed={0.3}
@@ -695,7 +799,7 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
           </div>
         </div>
       )}
-    </Card>
+      </Card>
 
     {/* Custom Event Configuration Modal */}
     {showCustomEventConfig && (
@@ -794,131 +898,131 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       </div>
     )}
 
-    {/* Gmail Configuration Modal */}
-    {showGmailConfig && (
-      <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
-        onClick={() => setShowGmailConfig(false)}
-      >
-        <Card 
-          className="w-[450px] max-h-[80vh] overflow-y-auto border-blue-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
+      {/* Gmail Configuration Modal */}
+      {showGmailConfig && (
+        <div 
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+          onClick={() => setShowGmailConfig(false)}
         >
-          <CardHeader className="border-b border-blue-500/20 pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Mail className="h-4 w-4 text-blue-400" />
-                Configure Gmail
-              </CardTitle>
-              <button
-                onClick={() => setShowGmailConfig(false)}
-                className="text-slate-400 hover:text-white transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-4 pb-4">
-            {/* OAuth Section */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Authentication</label>
-              {gmailConfig.authenticated ? (
-                <div className="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 text-sm text-center">
-                  ✓ Connected to Gmail
-                </div>
-              ) : (
-                <Button onClick={handleGmailAuth} className="w-full" size="sm">
-                  <Mail className="h-3.5 w-3.5 mr-2" />
-                  Sign in with Google
+          <Card 
+            className="w-[450px] max-h-[80vh] overflow-y-auto border-blue-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader className="border-b border-blue-500/20 pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Mail className="h-4 w-4 text-blue-400" />
+                  Configure Gmail
+                </CardTitle>
+                <button
+                  onClick={() => setShowGmailConfig(false)}
+                  className="text-slate-400 hover:text-white transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-4 pb-4">
+              {/* OAuth Section */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Authentication</label>
+                {gmailConfig.authenticated ? (
+                  <div className="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 text-sm text-center">
+                    ✓ Connected to Gmail
+                  </div>
+                ) : (
+                  <Button onClick={handleGmailAuth} className="w-full" size="sm">
+                    <Mail className="h-3.5 w-3.5 mr-2" />
+                    Sign in with Google
+                  </Button>
+                )}
+              </div>
+
+              {/* Email Configuration */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Recipient Email</label>
+                <input
+                  type="email"
+                  value={gmailConfig.to}
+                  onChange={(e) => setGmailConfig({ ...gmailConfig, to: e.target.value })}
+                  placeholder="recipient@example.com"
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Subject</label>
+                <input
+                  type="text"
+                  value={gmailConfig.subject}
+                  onChange={(e) => setGmailConfig({ ...gmailConfig, subject: e.target.value })}
+                  placeholder="Alert: {{event_type}}"
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Message Body</label>
+                <textarea
+                  value={gmailConfig.body}
+                  onChange={(e) => setGmailConfig({ ...gmailConfig, body: e.target.value })}
+                  placeholder="Event detected: {{event_description}}"
+                  rows={3}
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button 
+                  onClick={saveGmailConfig} 
+                  className="flex-1" 
+                  size="sm"
+                  disabled={!gmailConfig.authenticated || !gmailConfig.to}
+                >
+                  Save
                 </Button>
-              )}
-            </div>
-
-            {/* Email Configuration */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Recipient Email</label>
-              <input
-                type="email"
-                value={gmailConfig.to}
-                onChange={(e) => setGmailConfig({ ...gmailConfig, to: e.target.value })}
-                placeholder="recipient@example.com"
-                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Subject</label>
-              <input
-                type="text"
-                value={gmailConfig.subject}
-                onChange={(e) => setGmailConfig({ ...gmailConfig, subject: e.target.value })}
-                placeholder="Alert: {{event_type}}"
-                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Message Body</label>
-              <textarea
-                value={gmailConfig.body}
-                onChange={(e) => setGmailConfig({ ...gmailConfig, body: e.target.value })}
-                placeholder="Event detected: {{event_description}}"
-                rows={3}
-                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
-              />
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button 
-                onClick={saveGmailConfig} 
-                className="flex-1" 
-                size="sm"
-                disabled={!gmailConfig.authenticated || !gmailConfig.to}
-              >
-                Save
-              </Button>
-              <Button 
-                onClick={() => setShowGmailConfig(false)} 
-                variant="ghost" 
-                className="flex-1"
-                size="sm"
-              >
-                Cancel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )}
+                <Button 
+                  onClick={() => setShowGmailConfig(false)} 
+                  variant="ghost" 
+                  className="flex-1"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
     {/* SMS Configuration Modal */}
     {showSmsConfig && (
-      <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        <div 
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
         onClick={() => setShowSmsConfig(false)}
-      >
-        <Card 
-          className="w-[450px] max-h-[80vh] overflow-y-auto border-purple-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
         >
+          <Card 
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-purple-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
           <CardHeader className="border-b border-purple-500/20 pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
                 <MessageCircle className="h-4 w-4 text-purple-400" />
                 Configure SMS
-              </CardTitle>
-              <button
+                </CardTitle>
+                <button
                 onClick={() => setShowSmsConfig(false)}
-                className="text-slate-400 hover:text-white transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </CardHeader>
+                  className="text-slate-400 hover:text-white transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </CardHeader>
           <CardContent className="space-y-3 pt-4 pb-4">
             {/* Phone Number */}
             <div className="space-y-1.5">
@@ -936,17 +1040,17 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
             {/* Message Body */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-slate-300">Message</label>
-              <textarea
+                <textarea
                 value={smsConfig.body}
                 onChange={(e) => setSmsConfig({ ...smsConfig, body: e.target.value })}
                 placeholder="Alert: {{event_type}} detected at {{timestamp}}"
-                rows={4}
+                  rows={4}
                 className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 resize-none"
-              />
-              <p className="text-xs text-slate-400">
+                />
+                <p className="text-xs text-slate-400">
                 Variables: <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{'{{event_type}}'}</code> <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{'{{event_description}}'}</code>
               </p>
-            </div>
+              </div>
 
             <div className="flex gap-2 pt-2">
               <Button 
@@ -959,6 +1063,132 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
               </Button>
               <Button 
                 onClick={() => setShowSmsConfig(false)} 
+                variant="ghost" 
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+                </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+    {/* VAPI Call Configuration Modal */}
+    {showVapiConfig && (
+      <div 
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowVapiConfig(false)}
+      >
+        <Card 
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-purple-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <CardHeader className="border-b border-purple-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Phone className="h-4 w-4 text-purple-400" />
+                Configure Voice Call
+              </CardTitle>
+              <button
+                onClick={() => setShowVapiConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-4 pb-4">
+            {/* Phone Number */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Phone Number to Call</label>
+              <input
+                type="tel"
+                value={vapiConfig.phoneNumber}
+                onChange={(e) => {
+                  let value = e.target.value.replace(/[^\d+]/g, ''); // Only digits and +
+                  // Auto-add +1 if user starts typing without +
+                  if (value && !value.startsWith('+')) {
+                    value = '+1' + value;
+                  }
+                  setVapiConfig({ ...vapiConfig, phoneNumber: value });
+                }}
+                placeholder="+19255772134"
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+              />
+              <p className="text-xs text-slate-400">
+                {vapiConfig.phoneNumber && !vapiConfig.phoneNumber.startsWith('+') ? 
+                  <span className="text-red-400">⚠️ Must include country code (e.g., +1 for US)</span> :
+                  <span>Format: +19255772134</span>
+                }
+              </p>
+            </div>
+
+            {/* Message */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Message to Speak</label>
+                <textarea
+                value={vapiConfig.message}
+                onChange={(e) => setVapiConfig({ ...vapiConfig, message: e.target.value })}
+                placeholder="Alert: {{event_type}} detected at {{timestamp}}. Please check your surveillance system."
+                rows={3}
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 resize-none"
+              />
+              <p className="text-xs text-slate-400">
+                Variables: <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{'{{event_type}}'}</code> <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{'{{event_description}}'}</code>
+              </p>
+              </div>
+
+            {/* Voice Selection */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Voice</label>
+              <select
+                value={vapiConfig.voiceId}
+                onChange={(e) => setVapiConfig({ ...vapiConfig, voiceId: e.target.value })}
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+              >
+                {availableVoices && availableVoices.length > 0 ? (
+                  availableVoices.map((voice) => (
+                    <option key={voice.id} value={voice.id} className="bg-slate-900">
+                      {voice.name}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="rachel" className="bg-slate-900">Rachel (Female) - Loading...</option>
+                    <option value="domi" className="bg-slate-900">Domi (Female)</option>
+                    <option value="bella" className="bg-slate-900">Bella (Female)</option>
+                    <option value="antoni" className="bg-slate-900">Antoni (Male)</option>
+                    <option value="josh" className="bg-slate-900">Josh (Male)</option>
+                  </>
+                )}
+              </select>
+              <p className="text-xs text-slate-400">Select the voice for the call</p>
+                </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button 
+                onClick={() => {
+                  setNodes((nds) =>
+                    nds.map((node) =>
+                      node.id === vapiConfigNodeId
+                        ? { ...node, data: { ...node.data, config: vapiConfig } }
+                        : node
+                    )
+                  );
+                  setShowVapiConfig(false);
+                }} 
+                className="flex-1" 
+                size="sm"
+                disabled={!vapiConfig.phoneNumber || !vapiConfig.message}
+              >
+                Save
+              </Button>
+              <Button 
+                onClick={() => setShowVapiConfig(false)} 
                 variant="ghost" 
                 className="flex-1"
                 size="sm"
@@ -1074,17 +1304,17 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
               <p className="text-xs text-slate-300">
                 Workflow will only execute between {timeConditionConfig.startTime} and {timeConditionConfig.endTime} on selected days
               </p>
-            </div>
+              </div>
 
-            <div className="flex gap-2 pt-2">
-              <Button
+              <div className="flex gap-2 pt-2">
+                <Button 
                 onClick={saveTimeConditionConfig}
-                className="flex-1"
-                size="sm"
-              >
-                Save
-              </Button>
-              <Button
+                  className="flex-1" 
+                  size="sm"
+                >
+                  Save
+                </Button>
+                <Button 
                 onClick={() => setShowTimeConditionConfig(false)}
                 variant="ghost"
                 className="flex-1"
@@ -1340,17 +1570,17 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
               </Button>
               <Button 
                 onClick={() => setShowSlackConfig(false)} 
-                variant="ghost" 
-                className="flex-1"
-                size="sm"
-              >
-                Cancel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )}
+                  variant="ghost" 
+                  className="flex-1"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

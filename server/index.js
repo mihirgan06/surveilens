@@ -3,6 +3,7 @@ import cors from 'cors';
 import { google } from 'googleapis';
 import twilio from 'twilio';
 import dotenv from 'dotenv';
+import { VapiClient } from '@vapi-ai/server-sdk';
 
 dotenv.config({ path: '.env.local' });
 
@@ -24,6 +25,13 @@ const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+// Store user tokens for OAuth flows (Gmail)
+const userTokens = {};
+
+// Rate limiting for VAPI calls to prevent spam
+const vapiCallHistory = new Map(); // phoneNumber -> lastCallTimestamp
+const VAPI_CALL_COOLDOWN_MS = 60000; // 60 seconds between calls to same number
 
 // Debug: Log loaded credentials
 console.log('🔑 Google Client ID:', process.env.GOOGLE_CLIENT_ID ? '✅ Loaded' : '❌ Missing');
@@ -257,6 +265,137 @@ app.get('/slack/status/:nodeId', (req, res) => {
     configured: isConfigured,
     nodeId: nodeId
   });
+});
+
+// VAPI Voice Calling Endpoints
+app.post('/vapi/call', async (req, res) => {
+  const { phoneNumber, message, voiceId } = req.body;
+  
+  console.log('📞 VAPI call request received:');
+  console.log('  Phone:', phoneNumber);
+  console.log('  Message:', message);
+  console.log('  Voice:', voiceId);
+  console.log('  Using Phone Number ID:', process.env.VAPI_PHONE_NUMBER_ID);
+  
+  // Rate limiting check
+  const now = Date.now();
+  const lastCallTime = vapiCallHistory.get(phoneNumber) || 0;
+  const timeSinceLastCall = now - lastCallTime;
+  
+  if (timeSinceLastCall < VAPI_CALL_COOLDOWN_MS) {
+    const remainingSeconds = Math.ceil((VAPI_CALL_COOLDOWN_MS - timeSinceLastCall) / 1000);
+    console.log(`⏳ Rate limit: Call to ${phoneNumber} blocked. Wait ${remainingSeconds}s`);
+    return res.status(429).json({ 
+      error: 'Rate limit exceeded', 
+      message: `Please wait ${remainingSeconds} seconds before calling this number again`,
+      remainingSeconds 
+    });
+  }
+  
+  if (!process.env.VAPI_PRIVATE_KEY) {
+    return res.status(401).json({ error: 'VAPI private key not configured' });
+  }
+
+  if (!process.env.VAPI_PHONE_NUMBER_ID) {
+    return res.status(401).json({ error: 'VAPI phone number ID not configured. Please add a phone number in VAPI dashboard.' });
+  }
+  
+  try {
+    // Initialize VAPI SDK client (like the working implementation)
+    const vapi = new VapiClient({
+      token: process.env.VAPI_PRIVATE_KEY,
+    });
+
+    console.log(`📞 Using VAPI SDK with Riley assistant (proven to work)...`);
+    
+    // Make the call using Riley assistant (same as working VC-voice-agent)
+    const call = await vapi.calls.create({
+      type: 'outboundPhoneCall',
+      phoneNumberId: process.env.VAPI_PHONE_NUMBER_ID,
+      customer: {
+        number: phoneNumber,
+      },
+      assistantId: '689ee057-17d1-4ab0-81ba-c8f9a21a7783', // Riley assistant (confirmed working)
+      // Override Riley's default message with custom surveillance alert
+      assistantOverrides: {
+        firstMessage: message
+      }
+    });
+    
+    // Update rate limit tracker
+    vapiCallHistory.set(phoneNumber, Date.now());
+    console.log('✅ VAPI call initiated successfully using SDK');
+    console.log('📞 Call ID:', call.id);
+    console.log('📊 Rate limit set for', phoneNumber, '- next call allowed in 60s');
+    
+    res.json({ 
+      success: true, 
+      message: 'Call initiated successfully!', 
+      callId: call.id,
+      call: call
+    });
+    
+  } catch (error) {
+    console.error('❌ VAPI call error:', error);
+    
+    // Handle specific VAPI SDK errors
+    if (error.statusCode === 400) {
+      return res.status(400).json({ 
+        error: 'Bad request - check phone number format or configuration',
+        details: error.body || error.message 
+      });
+    }
+    
+    if (error.statusCode === 401) {
+      return res.status(401).json({ 
+        error: 'Unauthorized - check VAPI credentials' 
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to initiate call', 
+      details: error.message || String(error) 
+    });
+  }
+});
+
+// Get available VAPI voices
+app.get('/vapi/voices', async (req, res) => {
+  try {
+    // Comprehensive list of ElevenLabs voices that work with VAPI
+    const elevenLabsVoices = [
+      // Premium Female Voices
+      { id: 'rachel', name: 'Rachel - Natural & Conversational (Female)', provider: 'elevenlabs', category: 'female' },
+      { id: 'domi', name: 'Domi - Strong & Confident (Female)', provider: 'elevenlabs', category: 'female' },
+      { id: 'bella', name: 'Bella - Soft & Gentle (Female)', provider: 'elevenlabs', category: 'female' },
+      { id: 'elli', name: 'Elli - Young & Energetic (Female)', provider: 'elevenlabs', category: 'female' },
+      { id: 'charlotte', name: 'Charlotte - Professional (Female)', provider: 'elevenlabs', category: 'female' },
+      { id: 'jessica', name: 'Jessica - Warm & Friendly (Female)', provider: 'elevenlabs', category: 'female' },
+      
+      // Premium Male Voices
+      { id: 'antoni', name: 'Antoni - Well-Rounded (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'josh', name: 'Josh - Deep & Professional (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'arnold', name: 'Arnold - Crisp & Authoritative (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'adam', name: 'Adam - Deep & Resonant (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'sam', name: 'Sam - Dynamic & Raspy (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'clyde', name: 'Clyde - Warm & Rich (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'callum', name: 'Callum - Intense & Gritty (Male)', provider: 'elevenlabs', category: 'male' },
+      { id: 'patrick', name: 'Patrick - Shouty & Energetic (Male)', provider: 'elevenlabs', category: 'male' }
+    ];
+
+    console.log('📞 Serving', elevenLabsVoices.length, 'voice options');
+    res.json({ voices: elevenLabsVoices });
+  } catch (error) {
+    console.error('❌ Error fetching voices:', error);
+    // Fallback to basic voices if something goes wrong
+    res.json({
+      voices: [
+        { id: 'rachel', name: 'Rachel (Female)', provider: 'elevenlabs' },
+        { id: 'antoni', name: 'Antoni (Male)', provider: 'elevenlabs' },
+        { id: 'josh', name: 'Josh (Male)', provider: 'elevenlabs' }
+      ]
+    });
+  }
 });
 
 app.listen(PORT, () => {
