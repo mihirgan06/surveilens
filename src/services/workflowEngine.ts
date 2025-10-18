@@ -207,10 +207,12 @@ Respond with ONLY "YES" or "NO".`;
       // Find connected nodes
       const connectedNodes = this.getConnectedNodes(triggerNodeId, nodes, edges);
       console.log(`📦 Will execute ${connectedNodes.length} action nodes`);
+      console.log('📦 Connected nodes:', connectedNodes.map(n => ({ id: n.id, label: n.data.label, type: n.data.blockType })));
       
       for (let i = 0; i < connectedNodes.length; i++) {
         const node = connectedNodes[i];
         console.log(`\n🔄 [${i + 1}/${connectedNodes.length}] Executing action: ${node.data.label} (${node.data.blockType})`);
+        console.log('🔄 Node data:', node.data);
         
         execution.activeNodes = [node.id];
         this.notifyExecutionUpdate(execution);
@@ -248,6 +250,8 @@ Respond with ONLY "YES" or "NO".`;
     const config = node.data.config || {};
     
     console.log(`⚡ Executing ${nodeType} node:`, node.data.label);
+    console.log(`⚡ Node config:`, config);
+    console.log(`⚡ Event data:`, event);
 
     switch (nodeType) {
       case 'gmail':
@@ -255,6 +259,7 @@ Respond with ONLY "YES" or "NO".`;
         break;
       
       case 'slack':
+        console.log('💬 About to call sendSlack...');
         await this.sendSlack(config, event);
         break;
       
@@ -379,13 +384,19 @@ Respond with ONLY "YES" or "NO".`;
   }
 
   private async sendSlack(config: any, event: DetectionEvent): Promise<void> {
+    console.log('💬 sendSlack called with config:', config);
+    console.log('💬 sendSlack called with event:', event);
+    
     if (!config.configured || !config.channel) {
-      console.log('⚠️ Slack not configured');
+      console.log('⚠️ Slack not configured - configured:', config.configured, 'channel:', config.channel);
       return;
     }
 
     const message = this.replaceVariables(config.message, event);
     const channel = config.channel;
+
+    console.log('💬 Sending Slack message to channel:', channel);
+    console.log('💬 Message content:', message);
 
     try {
       const response = await fetch('http://localhost:3001/slack/send', {
