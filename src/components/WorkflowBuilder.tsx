@@ -164,6 +164,12 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     condition: '',
     fuzzyThreshold: 70
   });
+  const [showSmsConfig, setShowSmsConfig] = useState(false);
+  const [smsConfigNodeId, setSmsConfigNodeId] = useState<string>('');
+  const [smsConfig, setSmsConfig] = useState({
+    to: '',
+    body: ''
+  });
   const { project } = useReactFlow();
 
   // Notify parent of workflow changes
@@ -253,6 +259,11 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       console.log('🚀 Setting showGmailConfig to TRUE');
       setShowGmailConfig(true);
       console.log('✨ showGmailConfig should now be true');
+    } else if (blockType === 'sms') {
+      console.log('📱 Opening SMS config');
+      setSmsConfigNodeId(nodeId);
+      setSmsConfig(config || { to: '', body: '' });
+      setShowSmsConfig(true);
     } else if (blockType === 'custom_event') {
       console.log('🎯 Opening Custom Event config');
       setCustomEventConfigNodeId(nodeId);
@@ -408,6 +419,27 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       )
     );
     setShowCustomEventConfig(false);
+  };
+
+  const saveSmsConfig = () => {
+    if (!smsConfig.to?.trim()) {
+      alert('Please enter a phone number');
+      return;
+    }
+    
+    if (!smsConfig.body?.trim()) {
+      alert('Please enter a message body');
+      return;
+    }
+    
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === smsConfigNodeId
+          ? { ...node, data: { ...node.data, config: smsConfig } }
+          : node
+      )
+    );
+    setShowSmsConfig(false);
   };
 
   return (
@@ -728,6 +760,84 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
               </Button>
               <Button 
                 onClick={() => setShowGmailConfig(false)} 
+                variant="ghost" 
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+    {/* SMS Configuration Modal */}
+    {showSmsConfig && (
+      <div 
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowSmsConfig(false)}
+      >
+        <Card 
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-purple-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <CardHeader className="border-b border-purple-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageCircle className="h-4 w-4 text-purple-400" />
+                Configure SMS
+              </CardTitle>
+              <button
+                onClick={() => setShowSmsConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-4 pb-4">
+            {/* Phone Number */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Phone Number</label>
+              <input
+                type="tel"
+                value={smsConfig.to}
+                onChange={(e) => setSmsConfig({ ...smsConfig, to: e.target.value })}
+                placeholder="+1234567890"
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+              />
+              <p className="text-xs text-slate-400">Include country code (e.g., +1 for US)</p>
+            </div>
+
+            {/* Message Body */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Message</label>
+              <textarea
+                value={smsConfig.body}
+                onChange={(e) => setSmsConfig({ ...smsConfig, body: e.target.value })}
+                placeholder="Alert: {{event_type}} detected at {{timestamp}}"
+                rows={4}
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 resize-none"
+              />
+              <p className="text-xs text-slate-400">
+                Variables: <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{'{{event_type}}'}</code> <code className="text-xs bg-slate-800 px-1 py-0.5 rounded">{'{{event_description}}'}</code>
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button 
+                onClick={saveSmsConfig} 
+                className="flex-1" 
+                size="sm"
+                disabled={!smsConfig.to || !smsConfig.body}
+              >
+                Save
+              </Button>
+              <Button 
+                onClick={() => setShowSmsConfig(false)} 
                 variant="ghost" 
                 className="flex-1"
                 size="sm"

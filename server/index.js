@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
+import twilio from 'twilio';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.local' });
@@ -16,6 +17,12 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
   'http://localhost:3001/auth/google/callback'
+);
+
+// Twilio Client
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
 );
 
 // In-memory token storage (in production, use a database)
@@ -125,6 +132,41 @@ app.get('/gmail/status/:nodeId', (req, res) => {
   const { nodeId } = req.params;
   const isAuthenticated = !!userTokens[nodeId];
   res.json({ authenticated: isAuthenticated });
+});
+
+// Send SMS via Twilio
+app.post('/sms/send', async (req, res) => {
+  const { to, body } = req.body;
+  
+  console.log('📱 SMS send request received:');
+  console.log('  To:', to);
+  console.log('  Body:', body);
+  
+  if (!to || !body) {
+    console.error('❌ Missing required fields: to and body');
+    return res.status(400).json({ error: 'Missing required fields: to and body' });
+  }
+  
+  try {
+    const message = await twilioClient.messages.create({
+      body: body,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: to
+    });
+    
+    console.log('✅ SMS sent successfully! Message SID:', message.sid);
+    res.json({ 
+      success: true, 
+      message: 'SMS sent successfully!',
+      messageSid: message.sid
+    });
+  } catch (error) {
+    console.error('❌ Error sending SMS:', error);
+    res.status(500).json({ 
+      error: 'Failed to send SMS', 
+      details: error.message 
+    });
+  }
 });
 
 app.listen(PORT, () => {

@@ -266,12 +266,12 @@ Respond with ONLY "YES" or "NO".`;
         await this.sendGmail(config, event);
         break;
       
-      case 'slack':
-        await this.sendSlack(config, event);
-        break;
-      
       case 'sms':
         await this.sendSMS(config, event);
+        break;
+      
+      case 'slack':
+        await this.sendSlack(config, event);
         break;
       
       case 'vapi_call':
@@ -413,8 +413,52 @@ Respond with ONLY "YES" or "NO".`;
   }
 
   private async sendSMS(config: any, event: DetectionEvent): Promise<void> {
-    console.log('📱 SMS would be sent:', config);
-    // TODO: Implement Twilio SMS
+    console.log('📱 sendSMS called with config:', {
+      to: config.to,
+      hasBody: !!config.body
+    });
+
+    if (!config.to) {
+      console.error('❌ SMS recipient not configured!');
+      return;
+    }
+
+    if (!config.body) {
+      console.error('❌ SMS body not configured!');
+      return;
+    }
+
+    const body = this.replaceVariables(config.body, event);
+
+    console.log('📱 Sending SMS to:', config.to);
+    console.log('📱 Body:', body);
+
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const payload = {
+        to: config.to,
+        body
+      };
+
+      console.log('📱 Sending to backend:', `${backendUrl}/sms/send`, payload);
+
+      const response = await fetch(`${backendUrl}/sms/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const responseData = await response.text();
+      console.log('📱 Backend response:', response.status, responseData);
+
+      if (response.ok) {
+        console.log('✅✅✅ SMS sent successfully! ✅✅✅');
+      } else {
+        console.error('❌ Failed to send SMS. Status:', response.status, 'Response:', responseData);
+      }
+    } catch (error) {
+      console.error('❌ SMS error:', error);
+    }
   }
 
   private async makeVAPICall(config: any, event: DetectionEvent): Promise<void> {
