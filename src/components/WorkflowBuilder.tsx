@@ -227,30 +227,8 @@ function WorkflowBuilderInner({
   const prevInitialEdgesRef = useRef<Edge[]>([]);
   const isSyncingRef = useRef(false);
 
-  // Sync internal state with initialNodes/initialEdges when they change (but prevent infinite loop)
-  useEffect(() => {
-    const nodesChanged = JSON.stringify(initialNodes) !== JSON.stringify(prevInitialNodesRef.current);
-    const edgesChanged = JSON.stringify(initialEdges) !== JSON.stringify(prevInitialEdgesRef.current);
-
-    if (nodesChanged || edgesChanged) {
-      console.log('📥 Syncing with new initial workflow - Nodes:', initialNodes.length, '| Edges:', initialEdges.length);
-      
-      // Set sync flag to prevent triggering onWorkflowChange during sync
-      isSyncingRef.current = true;
-      
-      setNodes(initialNodes);
-      setEdges(initialEdges);
-      
-      // Update refs
-      prevInitialNodesRef.current = initialNodes;
-      prevInitialEdgesRef.current = initialEdges;
-      
-      // Reset flag after sync completes
-      setTimeout(() => {
-        isSyncingRef.current = false;
-      }, 0);
-    }
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
+  // Note: This useEffect is moved after restoreNodeData definition
+  // It will be added after restoreNodeData is defined
 
   // Notify parent of workflow changes (but not during sync to prevent loops)
   useEffect(() => {
@@ -450,19 +428,78 @@ function WorkflowBuilderInner({
     }
   }, []);
 
-  // Update existing nodes with handlers
+  // Helper function to restore node data with icons and handlers
+  const restoreNodeData = useCallback((node: Node) => {
+    // Find the icon based on blockType
+    let Icon = null;
+    
+    // Check trigger blocks
+    const triggerBlock = TRIGGER_BLOCKS.find(b => b.id === node.data?.blockType);
+    if (triggerBlock) {
+      Icon = triggerBlock.icon;
+    }
+    
+    // Check condition blocks
+    if (!Icon) {
+      const conditionBlock = CONDITION_BLOCKS.find(b => b.id === node.data?.blockType);
+      if (conditionBlock) {
+        Icon = conditionBlock.icon;
+      }
+    }
+    
+    // Check action blocks
+    if (!Icon) {
+      const actionBlock = ACTION_BLOCKS.find(b => b.id === node.data?.blockType);
+      if (actionBlock) {
+        Icon = actionBlock.icon;
+      }
+    }
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        icon: Icon,
+        onDelete: deleteNodeById,
+        onSettings: handleNodeSettings,
+      },
+    };
+  }, [deleteNodeById, handleNodeSettings]);
+
+  // Sync internal state with initialNodes/initialEdges when they change (but prevent infinite loop)
+  useEffect(() => {
+    const nodesChanged = JSON.stringify(initialNodes) !== JSON.stringify(prevInitialNodesRef.current);
+    const edgesChanged = JSON.stringify(initialEdges) !== JSON.stringify(prevInitialEdgesRef.current);
+
+    if (nodesChanged || edgesChanged) {
+      console.log('📥 Syncing with new initial workflow - Nodes:', initialNodes.length, '| Edges:', initialEdges.length);
+      
+      // Set sync flag to prevent triggering onWorkflowChange during sync
+      isSyncingRef.current = true;
+      
+      // Restore nodes with icons and handlers
+      const restoredNodes = initialNodes.map(node => restoreNodeData(node));
+      
+      setNodes(restoredNodes);
+      setEdges(initialEdges);
+      
+      // Update refs
+      prevInitialNodesRef.current = initialNodes;
+      prevInitialEdgesRef.current = initialEdges;
+      
+      // Reset flag after sync completes
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 0);
+    }
+  }, [initialNodes, initialEdges, setNodes, setEdges, restoreNodeData]);
+
+  // Update existing nodes with handlers and restore icons
   useEffect(() => {
     setNodes((nds) =>
-      nds.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onDelete: deleteNodeById,
-          onSettings: handleNodeSettings,
-        },
-      }))
+      nds.map((node) => restoreNodeData(node))
     );
-  }, [deleteNodeById, handleNodeSettings, setNodes]);
+  }, [restoreNodeData, setNodes]);
 
   const addBlock = (
     blockType: string, 

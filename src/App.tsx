@@ -18,11 +18,11 @@ const saveWorkflowToStorage = (videoId: string, nodes: Node[], edges: Edge[]) =>
     const cleanNodes = nodes.map(node => ({
       ...node,
       data: {
-        ...node.data,
-        icon: undefined,  // Remove icon component
-        onDelete: undefined,  // Remove callbacks
+        ...node.data,  // Keep ALL existing data including config
+        icon: undefined,  // Only remove non-serializable properties
+        onDelete: undefined,
         onSettings: undefined,
-        isExecuting: undefined,  // Remove runtime state
+        isExecuting: undefined,
         isTriggered: undefined,
       }
     }));
