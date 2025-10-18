@@ -155,18 +155,11 @@ const ACTION_BLOCKS = [
 interface WorkflowBuilderProps {
   onWorkflowChange?: (nodes: Node[], edges: Edge[]) => void;
   executingNodes?: string[];
-  initialNodes?: Node[];
-  initialEdges?: Edge[];
 }
 
-function WorkflowBuilderInner({
-  onWorkflowChange,
-  executingNodes = [],
-  initialNodes = [],
-  initialEdges = []
-}: WorkflowBuilderProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: WorkflowBuilderProps) {
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [showBlockPanel, setShowBlockPanel] = useState(false);
   const [showGmailConfig, setShowGmailConfig] = useState(false);
   const [gmailConfigNodeId, setGmailConfigNodeId] = useState<string>('');
@@ -222,51 +215,9 @@ function WorkflowBuilderInner({
     enabled: true
   });
 
-
-  // Sync internal state with initialNodes/initialEdges when they change (but prevent infinite loop)
-  const prevInitialNodesRef = useRef<Node[]>([]);
-  const prevInitialEdgesRef = useRef<Edge[]>([]);
-  const isSyncingRef = useRef(false);
-
+  // Notify parent of workflow changes
   useEffect(() => {
-    // Only sync if initialNodes/initialEdges are actually different (not just reference changes)
-    const nodesChanged = JSON.stringify(initialNodes) !== JSON.stringify(prevInitialNodesRef.current);
-    const edgesChanged = JSON.stringify(initialEdges) !== JSON.stringify(prevInitialEdgesRef.current);
-
-    if (nodesChanged || edgesChanged) {
-      console.log('🔄 WorkflowBuilder: Syncing with initial props -', initialNodes.length, 'nodes,', initialEdges.length, 'edges');
-      isSyncingRef.current = true;
-
-      // Restore icon and callbacks to loaded nodes
-      const restoredNodes = initialNodes.map(node => {
-        // Find the block definition to get the icon
-        const allBlocks = [...TRIGGER_BLOCKS, ...CONDITION_BLOCKS, ...ACTION_BLOCKS];
-        const blockDef = allBlocks.find(b => b.id === node.data.blockType);
-
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            icon: blockDef?.icon,  // Restore icon component
-            // Note: onDelete and onSettings will be added when nodes are updated later
-          }
-        };
-      });
-
-      setNodes(restoredNodes);
-      setEdges(initialEdges);
-      prevInitialNodesRef.current = initialNodes;
-      prevInitialEdgesRef.current = initialEdges;
-      // Reset flag after sync completes
-      setTimeout(() => {
-        isSyncingRef.current = false;
-      }, 0);
-    }
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
-
-  // Notify parent of workflow changes (but not during sync to prevent loops)
-  useEffect(() => {
-    if (onWorkflowChange && !isSyncingRef.current) {
+    if (onWorkflowChange) {
       onWorkflowChange(nodes, edges);
     }
   }, [nodes, edges, onWorkflowChange]);
@@ -461,6 +412,20 @@ function WorkflowBuilderInner({
       console.log('⚠️ Unknown block type:', blockType);
     }
   }, []);
+
+  // Update existing nodes with handlers
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          onDelete: deleteNodeById,
+          onSettings: handleNodeSettings,
+        },
+      }))
+    );
+  }, [deleteNodeById, handleNodeSettings, setNodes]);
 
   const addBlock = (
     blockType: string, 
