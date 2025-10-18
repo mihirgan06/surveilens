@@ -23,7 +23,7 @@ export const VideoUpload: React.FC<VideoUploadProps> = ({ onAlert }) => {
   const [allActivities, setAllActivities] = useState<SuspiciousActivity[]>([]);
   const [processedFrames, setProcessedFrames] = useState(0);
   const [totalFrames, setTotalFrames] = useState(0);
-  const animationIdRef = useRef<number>();
+  const animationIdRef = useRef<number | undefined>(undefined);
   
   // OpenAI Analysis States
   const [aiAnalysis, setAiAnalysis] = useState<SceneAnalysis | null>(null);

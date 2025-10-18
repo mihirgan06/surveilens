@@ -18,7 +18,7 @@ import 'reactflow/dist/style.css';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Plus, Trash2, Workflow as WorkflowIcon, Zap, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings } from 'lucide-react';
+import { Plus, Trash2, Workflow as WorkflowIcon, Zap, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // Custom Node Component with side handles, settings, and delete button
@@ -151,12 +151,19 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [showBlockPanel, setShowBlockPanel] = useState(false);
   const [showGmailConfig, setShowGmailConfig] = useState(false);
+  const [showSlackConfig, setShowSlackConfig] = useState(false);
   const [gmailConfigNodeId, setGmailConfigNodeId] = useState<string>('');
   const [gmailConfig, setGmailConfig] = useState({
     to: '',
     subject: '',
     body: '',
     authenticated: false
+  });
+  const [slackConfigNodeId, setSlackConfigNodeId] = useState<string>('');
+  const [slackConfig, setSlackConfig] = useState({
+    channel: '#general',
+    message: 'Alert: {{event_type}} - {{event_description}}',
+    configured: false
   });
   const [showCustomEventConfig, setShowCustomEventConfig] = useState(false);
   const [customEventConfigNodeId, setCustomEventConfigNodeId] = useState<string>('');
@@ -253,6 +260,13 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       console.log('🚀 Setting showGmailConfig to TRUE');
       setShowGmailConfig(true);
       console.log('✨ showGmailConfig should now be true');
+    } else if (blockType === 'slack') {
+      console.log('💬 Opening Slack config');
+      setSlackConfigNodeId(nodeId);
+      setSlackConfig(config || { channel: '#general', message: 'Alert: {{event_type}} - {{event_description}}', configured: false });
+      console.log('🚀 Setting showSlackConfig to TRUE');
+      setShowSlackConfig(true);
+      console.log('✨ showSlackConfig should now be true');
     } else if (blockType === 'custom_event') {
       console.log('🎯 Opening Custom Event config');
       setCustomEventConfigNodeId(nodeId);
@@ -731,6 +745,104 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
                 variant="ghost" 
                 className="flex-1"
                 size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+    {/* Slack Configuration Modal */}
+    {showSlackConfig && (
+      <div 
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowSlackConfig(false)}
+      >
+        <Card 
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-purple-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <CardHeader className="border-b border-purple-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageCircle className="h-4 w-4 text-purple-400" />
+                Configure Slack
+              </CardTitle>
+              <button
+                onClick={() => setShowSlackConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6 space-y-4">
+            <div>
+              <label className="text-sm font-medium text-slate-300 mb-2 block">
+                Channel
+              </label>
+              <input
+                type="text"
+                value={slackConfig.channel}
+                onChange={(e) => setSlackConfig(prev => ({ ...prev, channel: e.target.value }))}
+                placeholder="#general"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Enter channel name (e.g., #alerts, #security)
+              </p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-300 mb-2 block">
+                Message Template
+              </label>
+              <textarea
+                value={slackConfig.message}
+                onChange={(e) => setSlackConfig(prev => ({ ...prev, message: e.target.value }))}
+                placeholder="Alert: {{event_type}} - {{event_description}}"
+                rows={3}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Use variables: {'{{event_type}}'}, {'{{event_description}}'}, {'{{timestamp}}'}, {'{{confidence}}'}
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <Button
+                onClick={() => {
+                  // Update the node with Slack configuration
+                  const updatedNodes = nodes.map(node => {
+                    if (node.id === slackConfigNodeId) {
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          config: {
+                            ...node.data.config,
+                            ...slackConfig,
+                            configured: true,
+                            nodeId: slackConfigNodeId
+                          }
+                        }
+                      };
+                    }
+                    return node;
+                  });
+                  setNodes(updatedNodes);
+                  setShowSlackConfig(false);
+                }}
+                className="flex-1 bg-purple-600 hover:bg-purple-700"
+              >
+                Save Configuration
+              </Button>
+              <Button
+                onClick={() => setShowSlackConfig(false)}
+                variant="outline"
+                className="flex-1"
               >
                 Cancel
               </Button>

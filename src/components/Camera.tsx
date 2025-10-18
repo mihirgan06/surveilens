@@ -16,7 +16,7 @@ export const Camera: React.FC<CameraProps> = ({ onAlert }) => {
   const [suspiciousActivities, setSuspiciousActivities] = useState<SuspiciousActivity[]>([]);
   const [error, setError] = useState<string>('');
   const streamRef = useRef<MediaStream | null>(null);
-  const animationIdRef = useRef<number>();
+  const animationIdRef = useRef<number | undefined>(undefined);
 
   const startCamera = async () => {
     try {

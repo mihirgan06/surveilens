@@ -5,8 +5,7 @@ import WorkflowBuilder from './components/WorkflowBuilder';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
-import { Video, Upload, Play, Pause, RotateCcw, Shield, AlertTriangle, Eye, Brain, Camera, VideoOff } from 'lucide-react';
-import { cn } from './lib/utils';
+import { Video, Upload, Shield, AlertTriangle, Eye, Brain, Camera, VideoOff } from 'lucide-react';
 import { workflowEngine } from './services/workflowEngine';
 import { ToastContainer, useToast } from './components/ui/toast';
 import type { Node, Edge } from 'reactflow';
@@ -31,7 +30,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoUrlRef = useRef<string>('');
-  const detectionLoopRef = useRef<number | undefined>();
+  const detectionLoopRef = useRef<number | undefined>(undefined);
 
   const hasApiKey = !!import.meta.env.VITE_OPENAI_API_KEY && 
                     import.meta.env.VITE_OPENAI_API_KEY !== 'your_openai_api_key_here';
@@ -393,21 +392,6 @@ function App() {
     };
   }, [videoFile]);
 
-  const togglePlayPause = () => {
-    if (!videoRef.current) return;
-    
-    if (isPlaying) {
-      videoRef.current.pause();
-      setIsPlaying(false);
-      if (detectionLoopRef.current) {
-        cancelAnimationFrame(detectionLoopRef.current);
-      }
-    } else {
-      videoRef.current.play();
-      setIsPlaying(true);
-      runDetection();
-    }
-  };
 
   useEffect(() => {
     console.log('🎬 Detection loop effect triggered - isPlaying:', isPlaying, 'isInitialized:', isInitialized);

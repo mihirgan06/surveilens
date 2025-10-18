@@ -379,31 +379,56 @@ Respond with ONLY "YES" or "NO".`;
   }
 
   private async sendSlack(config: any, event: DetectionEvent): Promise<void> {
-    console.log('💬 Slack message would be sent:', config);
-    // TODO: Implement Slack webhook
+    if (!config.configured || !config.channel) {
+      console.log('⚠️ Slack not configured');
+      return;
+    }
+
+    const message = this.replaceVariables(config.message, event);
+    const channel = config.channel;
+
+    try {
+      const response = await fetch('http://localhost:3001/slack/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeId: config.nodeId,
+          channel,
+          message
+        })
+      });
+
+      if (response.ok) {
+        console.log('💬 Slack message sent successfully');
+      } else {
+        console.error('❌ Failed to send Slack message:', await response.text());
+      }
+    } catch (error) {
+      console.error('❌ Slack error:', error);
+    }
   }
 
-  private async sendSMS(config: any, event: DetectionEvent): Promise<void> {
+  private async sendSMS(config: any, _event: DetectionEvent): Promise<void> {
     console.log('📱 SMS would be sent:', config);
     // TODO: Implement Twilio SMS
   }
 
-  private async makeVAPICall(config: any, event: DetectionEvent): Promise<void> {
+  private async makeVAPICall(config: any, _event: DetectionEvent): Promise<void> {
     console.log('📞 VAPI call would be made:', config);
     // TODO: Implement VAPI voice call
   }
 
-  private async callWebhook(config: any, event: DetectionEvent): Promise<void> {
+  private async callWebhook(config: any, _event: DetectionEvent): Promise<void> {
     console.log('🔗 Webhook would be called:', config);
     // TODO: Implement webhook POST
   }
 
-  private async logToDatabase(config: any, event: DetectionEvent): Promise<void> {
+  private async logToDatabase(_config: any, event: DetectionEvent): Promise<void> {
     console.log('💾 Database log:', event);
     // TODO: Implement database logging
   }
 
-  private async saveScreenshot(config: any, event: DetectionEvent): Promise<void> {
+  private async saveScreenshot(config: any, _event: DetectionEvent): Promise<void> {
     console.log('📸 Screenshot would be saved:', config);
     // TODO: Implement screenshot capture
   }
