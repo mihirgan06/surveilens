@@ -204,31 +204,39 @@ Respond with ONLY "YES" or "NO".`;
     this.notifyExecutionUpdate(execution);
 
     try {
-      // Find connected nodes
-      const connectedNodes = this.getConnectedNodes(triggerNodeId, nodes, edges);
-      console.log(`📦 Will execute ${connectedNodes.length} action nodes`);
+      // Use BFS to group nodes by level for parallel execution
+      const nodeLevels = this.getNodesByLevel(triggerNodeId, nodes, edges);
+      console.log(`📦 Will execute ${nodeLevels.flat().length} action nodes in ${nodeLevels.length} levels`);
       
-      for (let i = 0; i < connectedNodes.length; i++) {
-        const node = connectedNodes[i];
-        console.log(`\n🔄 [${i + 1}/${connectedNodes.length}] Executing action: ${node.data.label} (${node.data.blockType})`);
+      for (let levelIndex = 0; levelIndex < nodeLevels.length; levelIndex++) {
+        const levelNodes = nodeLevels[levelIndex];
+        console.log(`\n🔄 LEVEL ${levelIndex + 1}: Executing ${levelNodes.length} nodes in parallel`);
         
-        // Show this node as executing
-        execution.activeNodes = [node.id];
+        // Show ALL nodes in this level as executing simultaneously
+        execution.activeNodes = levelNodes.map(n => n.id);
         this.notifyExecutionUpdate(execution);
         
         // Wait for visual feedback to show
         await new Promise(resolve => setTimeout(resolve, 300));
         
-        try {
-          await this.executeNode(node, event);
-          console.log(`✅ [${i + 1}/${connectedNodes.length}] Completed: ${node.data.label}`);
-        } catch (error) {
-          console.error(`❌ [${i + 1}/${connectedNodes.length}] Failed: ${node.data.label}`, error);
-          // Continue with other nodes even if one fails
-        }
+        // Execute all nodes at this level in parallel
+        const levelPromises = levelNodes.map(async (node, i) => {
+          console.log(`  ⚡ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Executing: ${node.data.label} (${node.data.blockType})`);
+          try {
+            await this.executeNode(node, event);
+            console.log(`  ✅ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Completed: ${node.data.label}`);
+          } catch (error) {
+            console.error(`  ❌ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Failed: ${node.data.label}`, error);
+          }
+        });
         
-        // Keep the node highlighted for a moment after completion
+        // Wait for all nodes in this level to complete
+        await Promise.all(levelPromises);
+        
+        // Keep the nodes highlighted for a moment after completion
         await new Promise(resolve => setTimeout(resolve, 700));
+        
+        console.log(`✅ Level ${levelIndex + 1} completed`);
       }
 
       execution.status = 'completed';
@@ -236,7 +244,7 @@ Respond with ONLY "YES" or "NO".`;
       this.notifyExecutionUpdate(execution);
       
       console.log('\n✅ Workflow completed:', workflowId);
-      console.log(`📊 Executed ${connectedNodes.length} total actions\n`);
+      console.log(`📊 Executed ${nodeLevels.flat().length} total actions across ${nodeLevels.length} levels\n`);
     } catch (error) {
       console.error('❌ Workflow execution failed:', error);
       execution.status = 'failed';
@@ -288,39 +296,56 @@ Respond with ONLY "YES" or "NO".`;
   }
 
   /**
-   * Get all nodes connected to a trigger node
+   * Get nodes grouped by level using BFS for parallel execution
    */
-  private getConnectedNodes(startNodeId: string, nodes: Node[], edges: Edge[]): Node[] {
-    console.log('🔗 Finding nodes connected to:', startNodeId);
+  private getNodesByLevel(startNodeId: string, nodes: Node[], edges: Edge[]): Node[][] {
+    console.log('🔗 Finding nodes by level starting from:', startNodeId);
     console.log('📊 Total nodes:', nodes.length, 'Total edges:', edges.length);
     
-    const connected: Node[] = [];
+    const levels: Node[][] = [];
     const visited = new Set<string>();
-    const queue = [startNodeId];
+    const queue: Array<{ nodeId: string; level: number }> = [{ nodeId: startNodeId, level: 0 }];
 
     while (queue.length > 0) {
-      const currentId = queue.shift()!;
+      const { nodeId: currentId, level } = queue.shift()!;
       if (visited.has(currentId)) continue;
       visited.add(currentId);
 
       // Find edges from this node
       const outgoingEdges = edges.filter(e => e.source === currentId);
-      console.log(`📍 Node ${currentId} has ${outgoingEdges.length} outgoing edges`);
+      console.log(`📍 Node ${currentId} (Level ${level}) has ${outgoingEdges.length} outgoing edges`);
       
       for (const edge of outgoingEdges) {
         const targetNode = nodes.find(n => n.id === edge.target);
-        if (targetNode) {
-          console.log(`  ➡️ Connected to: ${targetNode.data.label} (${targetNode.data.blockType})`);
+        if (targetNode && !visited.has(edge.target)) {
+          console.log(`  ➡️ Level ${level + 1}: ${targetNode.data.label} (${targetNode.data.blockType})`);
+          
           if (targetNode.data.nodeType !== 'trigger') {
-            connected.push(targetNode);
-            queue.push(edge.target);
+            // Ensure the level array exists
+            if (!levels[level]) {
+              levels[level] = [];
+            }
+            levels[level].push(targetNode);
+            queue.push({ nodeId: edge.target, level: level + 1 });
           }
         }
       }
     }
 
-    console.log('✅ Found', connected.length, 'connected nodes:', connected.map(n => n.data.label));
-    return connected;
+    console.log('✅ Found', levels.flat().length, 'nodes across', levels.length, 'levels');
+    levels.forEach((levelNodes, i) => {
+      console.log(`  Level ${i + 1}:`, levelNodes.map(n => n.data.label).join(', '));
+    });
+    
+    return levels;
+  }
+
+  /**
+   * Get all nodes connected to a trigger node (legacy method, kept for compatibility)
+   */
+  private getConnectedNodes(startNodeId: string, nodes: Node[], edges: Edge[]): Node[] {
+    const levels = this.getNodesByLevel(startNodeId, nodes, edges);
+    return levels.flat();
   }
 
   /**
@@ -440,4 +465,5 @@ Respond with ONLY "YES" or "NO".`;
 }
 
 export const workflowEngine = new WorkflowEngine();
+
 
