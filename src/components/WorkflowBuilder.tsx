@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import ReactFlow, {
   type Node,
   type Edge,
@@ -18,7 +18,7 @@ import 'reactflow/dist/style.css';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Plus, Trash2, Workflow as WorkflowIcon, Zap, GitBranch, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings } from 'lucide-react';
+import { Plus, Trash2, Workflow as WorkflowIcon, Zap, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // Custom Node Component with side handles, settings, and delete button
@@ -130,13 +130,6 @@ const TRIGGER_BLOCKS = [
   { id: 'custom_event', label: 'Custom Event', icon: Zap },
 ];
 
-const CONDITION_BLOCKS = [
-  { id: 'time_filter', label: 'Time Filter', icon: GitBranch },
-  { id: 'counter', label: 'Counter', icon: GitBranch },
-  { id: 'delay', label: 'Delay', icon: GitBranch },
-  { id: 'zone_filter', label: 'Zone Filter', icon: GitBranch },
-  { id: 'confidence_check', label: 'Confidence Check', icon: GitBranch },
-];
 
 const ACTION_BLOCKS = [
   { id: 'gmail', label: 'Send Gmail', icon: Mail, color: '#fca5a5' }, // Soft red
@@ -165,11 +158,13 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     body: '',
     authenticated: false
   });
-  const [showCustomTriggerConfig, setShowCustomTriggerConfig] = useState(false);
-  const [customTriggerNodeId, setCustomTriggerNodeId] = useState<string>('');
-  const [customTriggerCondition, setCustomTriggerCondition] = useState('');
+  const [showCustomEventConfig, setShowCustomEventConfig] = useState(false);
+  const [customEventConfigNodeId, setCustomEventConfigNodeId] = useState<string>('');
+  const [customEventConfig, setCustomEventConfig] = useState({
+    condition: '',
+    fuzzyThreshold: 70
+  });
   const { project } = useReactFlow();
-  const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // Notify parent of workflow changes
   useEffect(() => {
@@ -193,6 +188,12 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
   useEffect(() => {
     console.log('📋 showGmailConfig state changed to:', showGmailConfig);
   }, [showGmailConfig]);
+
+  // Debug: Log when showCustomEventConfig changes
+  useEffect(() => {
+    console.log('🎯 showCustomEventConfig state changed to:', showCustomEventConfig);
+    console.log('🎯 customEventConfig:', customEventConfig);
+  }, [showCustomEventConfig, customEventConfig]);
 
   // Listen for OAuth callback messages
   useEffect(() => {
@@ -249,14 +250,16 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       console.log('📧 Opening Gmail config');
       setGmailConfigNodeId(nodeId);
       setGmailConfig(config || { to: '', subject: '', body: '', authenticated: false });
+      console.log('🚀 Setting showGmailConfig to TRUE');
       setShowGmailConfig(true);
+      console.log('✨ showGmailConfig should now be true');
     } else if (blockType === 'custom_event') {
-      console.log('🎨 Opening Custom Trigger config');
-      setCustomTriggerNodeId(nodeId);
-      setCustomTriggerCondition(config?.condition || '');
-      setShowCustomTriggerConfig(true);
+      console.log('🎯 Opening Custom Event config');
+      setCustomEventConfigNodeId(nodeId);
+      setCustomEventConfig(config || { condition: '', fuzzyThreshold: 70 });
+      setShowCustomEventConfig(true);
     } else {
-      console.log('⚠️ No configuration UI for blockType:', blockType);
+      console.log('⚠️ Unknown block type:', blockType);
     }
   }, []);
 
@@ -327,36 +330,26 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     setEdges([]);
   };
 
-  const handleGmailAuth = async () => {
+  const handleGmailAuth = () => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    window.open(`${backendUrl}/auth/google?nodeId=${gmailConfigNodeId}`, '_blank', 'width=500,height=600');
     
-    try {
-      // First, get the auth URL from the backend
-      const res = await fetch(`${backendUrl}/auth/google?nodeId=${gmailConfigNodeId}`);
-      const data = await res.json();
-      
-      // Then open the Google OAuth URL in a popup
-      window.open(data.authUrl, '_blank', 'width=500,height=600');
-      
-      // Listen for auth success
-      const checkAuth = setInterval(async () => {
-        try {
-          const res = await fetch(`${backendUrl}/gmail/status/${gmailConfigNodeId}`);
-          const data = await res.json();
-          if (data.authenticated) {
-            setGmailConfig(prev => ({ ...prev, authenticated: true, nodeId: gmailConfigNodeId }));
-            clearInterval(checkAuth);
-          }
-        } catch (err) {
-          console.error('Auth check failed:', err);
+    // Listen for auth success
+    const checkAuth = setInterval(async () => {
+      try {
+        const res = await fetch(`${backendUrl}/gmail/status/${gmailConfigNodeId}`);
+        const data = await res.json();
+        if (data.authenticated) {
+          setGmailConfig(prev => ({ ...prev, authenticated: true }));
+          clearInterval(checkAuth);
         }
-      }, 2000);
+      } catch (err) {
+        console.error('Auth check failed:', err);
+      }
+    }, 2000);
 
-      // Stop checking after 2 minutes
-      setTimeout(() => clearInterval(checkAuth), 120000);
-    } catch (err) {
-      console.error('Failed to get auth URL:', err);
-    }
+    // Stop checking after 2 minutes
+    setTimeout(() => clearInterval(checkAuth), 120000);
   };
 
   const saveGmailConfig = () => {
@@ -372,15 +365,20 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     setShowGmailConfig(false);
   };
 
-  const saveCustomTriggerConfig = () => {
+  const saveCustomEventConfig = () => {
+    if (!customEventConfig.condition?.trim()) {
+      alert('Please enter a trigger condition');
+      return;
+    }
+    
     setNodes((nds) =>
       nds.map((node) =>
-        node.id === customTriggerNodeId
-          ? { ...node, data: { ...node.data, config: { condition: customTriggerCondition } } }
+        node.id === customEventConfigNodeId
+          ? { ...node, data: { ...node.data, config: customEventConfig } }
           : node
       )
     );
-    setShowCustomTriggerConfig(false);
+    setShowCustomEventConfig(false);
   };
 
   return (
@@ -515,181 +513,203 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
           </div>
         </div>
       )}
-      </Card>
+    </Card>
 
-      {/* Gmail Configuration Modal */}
-      {showGmailConfig && (
-        <div 
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
-          onClick={() => setShowGmailConfig(false)}
+    {/* Custom Event Configuration Modal */}
+    {showCustomEventConfig && (
+      <div 
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowCustomEventConfig(false)}
+      >
+        <Card 
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-green-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
         >
-          <Card 
-            className="w-[450px] max-h-[80vh] overflow-y-auto border-blue-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <CardHeader className="border-b border-blue-500/20 pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Mail className="h-4 w-4 text-blue-400" />
-                  Configure Gmail
-                </CardTitle>
-                <button
-                  onClick={() => setShowGmailConfig(false)}
-                  className="text-slate-400 hover:text-white transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-4 pb-4">
-              {/* OAuth Section */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Authentication</label>
-                {gmailConfig.authenticated ? (
-                  <div className="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 text-sm text-center">
-                    ✓ Connected to Gmail
-                  </div>
-                ) : (
-                  <Button onClick={handleGmailAuth} className="w-full" size="sm">
-                    <Mail className="h-3.5 w-3.5 mr-2" />
-                    Sign in with Google
-                  </Button>
-                )}
-              </div>
+          <CardHeader className="border-b border-green-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Zap className="h-4 w-4 text-green-400" />
+                Configure Custom Event
+              </CardTitle>
+              <button
+                onClick={() => setShowCustomEventConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 pb-4">
+            {/* Event Label */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Event to Detect</label>
+              <input
+                type="text"
+                value={customEventConfig.condition}
+                onChange={(e) => setCustomEventConfig({ ...customEventConfig, condition: e.target.value })}
+                placeholder="e.g., person sitting on floor"
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+              />
+              <p className="text-xs text-slate-400">Describe what you want to detect in natural language</p>
+            </div>
 
-              {/* Email Configuration */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Recipient Email</label>
-                <input
-                  type="email"
-                  value={gmailConfig.to}
-                  onChange={(e) => setGmailConfig({ ...gmailConfig, to: e.target.value })}
-                  placeholder="recipient@example.com"
-                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                />
+            {/* Fuzzy Threshold Slider */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Fuzzy Matching Threshold: {customEventConfig.fuzzyThreshold}%
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={customEventConfig.fuzzyThreshold}
+                onChange={(e) => setCustomEventConfig({ ...customEventConfig, fuzzyThreshold: parseInt(e.target.value) })}
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+              />
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>More Lenient (0%)</span>
+                <span>Stricter (100%)</span>
               </div>
+              <p className="text-xs text-slate-400">
+                Lower = matches similar activities (e.g., "sitting" matches "sitting on floor" at 70%)
+              </p>
+            </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Subject</label>
-                <input
-                  type="text"
-                  value={gmailConfig.subject}
-                  onChange={(e) => setGmailConfig({ ...gmailConfig, subject: e.target.value })}
-                  placeholder="Alert: {{event_type}}"
-                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
+            {/* Example */}
+            <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+              <p className="text-xs font-medium text-green-400 mb-1">AI-Powered Matching Examples:</p>
+              <p className="text-xs text-slate-300">
+                • "someone stealing" → triggers on "robbery detected"<br/>
+                • "person sitting on floor" → triggers on "person sitting"<br/>
+                • "fight happening" → triggers on "violence detected"<br/>
+                The AI understands semantic similarity at the threshold level you set.
+              </p>
+            </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Message Body</label>
-                <textarea
-                  value={gmailConfig.body}
-                  onChange={(e) => setGmailConfig({ ...gmailConfig, body: e.target.value })}
-                  placeholder="Event detected: {{event_description}}"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                />
-              </div>
+            <div className="flex gap-2 pt-2">
+              <Button 
+                onClick={saveCustomEventConfig} 
+                className="flex-1" 
+                size="sm"
+                disabled={!customEventConfig.condition?.trim()}
+              >
+                Save
+              </Button>
+              <Button 
+                onClick={() => setShowCustomEventConfig(false)} 
+                variant="ghost" 
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
 
-              <div className="flex gap-2 pt-2">
-                <Button 
-                  onClick={saveGmailConfig} 
-                  className="flex-1" 
-                  size="sm"
-                  disabled={!gmailConfig.authenticated || !gmailConfig.to}
-                >
-                  Save
-                </Button>
-                <Button 
-                  onClick={() => setShowGmailConfig(false)} 
-                  variant="ghost" 
-                  className="flex-1"
-                  size="sm"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Custom Trigger Configuration Modal */}
-      {showCustomTriggerConfig && (
-        <div 
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
-          onClick={() => setShowCustomTriggerConfig(false)}
+    {/* Gmail Configuration Modal */}
+    {showGmailConfig && (
+      <div 
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowGmailConfig(false)}
+      >
+        <Card 
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-blue-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
         >
-          <Card 
-            className="w-[500px] max-h-[80vh] overflow-y-auto border-green-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <CardHeader className="border-b border-green-500/20 pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Zap className="h-4 w-4 text-green-400" />
-                  Configure Custom Trigger
-                </CardTitle>
-                <button
-                  onClick={() => setShowCustomTriggerConfig(false)}
-                  className="text-slate-400 hover:text-white transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-4 pb-4">
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-300">Trigger Condition</label>
-                <p className="text-xs text-slate-400">
-                  Describe what you want to detect. The AI will match this condition against the video analysis.
-                </p>
-                <textarea
-                  value={customTriggerCondition}
-                  onChange={(e) => setCustomTriggerCondition(e.target.value)}
-                  placeholder="Example: someone stealing something, person running away, car parked illegally, etc."
-                  rows={4}
-                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500 resize-none"
-                />
-              </div>
-
-              <div className="bg-slate-950/50 border border-slate-700 rounded p-3 space-y-2">
-                <div className="text-xs font-medium text-slate-300">Examples:</div>
-                <div className="space-y-1 text-xs text-slate-400">
-                  <div>• "Someone stealing merchandise"</div>
-                  <div>• "Person running away quickly"</div>
-                  <div>• "Multiple people fighting"</div>
-                  <div>• "Someone leaving a bag unattended"</div>
-                  <div>• "Person wearing a mask inside"</div>
+          <CardHeader className="border-b border-blue-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Mail className="h-4 w-4 text-blue-400" />
+                Configure Gmail
+              </CardTitle>
+              <button
+                onClick={() => setShowGmailConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-4 pb-4">
+            {/* OAuth Section */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Authentication</label>
+              {gmailConfig.authenticated ? (
+                <div className="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 text-sm text-center">
+                  ✓ Connected to Gmail
                 </div>
-              </div>
+              ) : (
+                <Button onClick={handleGmailAuth} className="w-full" size="sm">
+                  <Mail className="h-3.5 w-3.5 mr-2" />
+                  Sign in with Google
+                </Button>
+              )}
+            </div>
 
-              <div className="flex gap-2 pt-2">
-                <Button 
-                  onClick={saveCustomTriggerConfig} 
-                  className="flex-1" 
-                  size="sm"
-                  disabled={!customTriggerCondition.trim()}
-                >
-                  Save
-                </Button>
-                <Button 
-                  onClick={() => setShowCustomTriggerConfig(false)} 
-                  variant="ghost" 
-                  className="flex-1"
-                  size="sm"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+            {/* Email Configuration */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Recipient Email</label>
+              <input
+                type="email"
+                value={gmailConfig.to}
+                onChange={(e) => setGmailConfig({ ...gmailConfig, to: e.target.value })}
+                placeholder="recipient@example.com"
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Subject</label>
+              <input
+                type="text"
+                value={gmailConfig.subject}
+                onChange={(e) => setGmailConfig({ ...gmailConfig, subject: e.target.value })}
+                placeholder="Alert: {{event_type}}"
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Message Body</label>
+              <textarea
+                value={gmailConfig.body}
+                onChange={(e) => setGmailConfig({ ...gmailConfig, body: e.target.value })}
+                placeholder="Event detected: {{event_description}}"
+                rows={3}
+                className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button 
+                onClick={saveGmailConfig} 
+                className="flex-1" 
+                size="sm"
+                disabled={!gmailConfig.authenticated || !gmailConfig.to}
+              >
+                Save
+              </Button>
+              <Button 
+                onClick={() => setShowGmailConfig(false)} 
+                variant="ghost" 
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
     </>
   );
 }
