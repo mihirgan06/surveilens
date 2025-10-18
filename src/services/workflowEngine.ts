@@ -211,31 +211,48 @@ Respond with ONLY "YES" or "NO".`;
       for (let levelIndex = 0; levelIndex < nodeLevels.length; levelIndex++) {
         const levelNodes = nodeLevels[levelIndex];
         console.log(`\n🔄 LEVEL ${levelIndex + 1}: Executing ${levelNodes.length} nodes in parallel`);
-        
+
         // Show ALL nodes in this level as executing simultaneously
         execution.activeNodes = levelNodes.map(n => n.id);
         this.notifyExecutionUpdate(execution);
-        
+
         // Wait for visual feedback to show
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // Execute all nodes at this level in parallel
-        const levelPromises = levelNodes.map(async (node, i) => {
-          console.log(`  ⚡ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Executing: ${node.data.label} (${node.data.blockType})`);
-          try {
-            await this.executeNode(node, event);
-            console.log(`  ✅ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Completed: ${node.data.label}`);
-          } catch (error) {
-            console.error(`  ❌ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Failed: ${node.data.label}`, error);
-          }
-        });
-        
-        // Wait for all nodes in this level to complete
-        await Promise.all(levelPromises);
-        
+        const levelResults = await Promise.allSettled(
+          levelNodes.map(async (node, i) => {
+            console.log(`  ⚡ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Executing: ${node.data.label} (${node.data.blockType})`);
+            try {
+              await this.executeNode(node, event);
+              console.log(`  ✅ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Completed: ${node.data.label}`);
+              return { success: true, node };
+            } catch (error) {
+              console.error(`  ❌ [Level ${levelIndex + 1}, Node ${i + 1}/${levelNodes.length}] Failed: ${node.data.label}`, error);
+              return { success: false, node, error };
+            }
+          })
+        );
+
+        // Check if any condition failed
+        const failedCondition = levelResults.find(
+          (result) =>
+            result.status === 'fulfilled' &&
+            !result.value.success &&
+            result.value.node.data.nodeType === 'condition'
+        );
+
+        if (failedCondition) {
+          console.log('🛑 Workflow stopped: Condition failed');
+          execution.status = 'failed';
+          execution.activeNodes = [];
+          this.notifyExecutionUpdate(execution);
+          return;
+        }
+
         // Keep the nodes highlighted for a moment after completion
         await new Promise(resolve => setTimeout(resolve, 700));
-        
+
         console.log(`✅ Level ${levelIndex + 1} completed`);
       }
 
@@ -253,13 +270,77 @@ Respond with ONLY "YES" or "NO".`;
   }
 
   /**
-   * Execute a single node (action block)
+   * Evaluate if a condition node passes
+   */
+  private evaluateCondition(node: Node): boolean {
+    const nodeType = node.data.blockType;
+    const config = node.data.config || {};
+
+    console.log(`🔍 Evaluating condition: ${nodeType}`, config);
+
+    if (!config.enabled) {
+      console.log('⚠️ Condition is disabled, skipping');
+      return true; // If disabled, always pass
+    }
+
+    if (nodeType === 'time_condition') {
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+
+      // Check if current day is in allowed days
+      const daysOfWeek = config.daysOfWeek || [1, 2, 3, 4, 5]; // Default to weekdays
+      if (!daysOfWeek.includes(currentDay)) {
+        console.log(`❌ Time condition failed: Current day (${currentDay}) not in allowed days`, daysOfWeek);
+        return false;
+      }
+
+      // Check if current time is within range
+      if (currentTime < config.startTime || currentTime > config.endTime) {
+        console.log(`❌ Time condition failed: Current time ${currentTime} not between ${config.startTime} and ${config.endTime}`);
+        return false;
+      }
+
+      console.log(`✅ Time condition passed: ${currentTime} on day ${currentDay}`);
+      return true;
+    }
+
+    if (nodeType === 'location_condition') {
+      // For named zones, we'll assume the location matches for now
+      // In a real implementation, you would check against actual camera location data
+      if (config.locationType === 'zone') {
+        console.log(`✅ Location condition passed: Zone "${config.zoneName}" (simulated)`);
+        return true; // Simulated - always pass for zones
+      }
+
+      // For GPS coordinates, you would check browser geolocation or camera metadata
+      // This is a placeholder implementation
+      console.log(`✅ Location condition passed: GPS coordinates (simulated)`);
+      return true; // Simulated - always pass for GPS
+    }
+
+    console.log('⚠️ Unknown condition type, defaulting to pass');
+    return true;
+  }
+
+  /**
+   * Execute a single node (action block or condition)
    */
   private async executeNode(node: Node, event: DetectionEvent): Promise<void> {
     const nodeType = node.data.blockType;
     const config = node.data.config || {};
-    
+
     console.log(`⚡ Executing ${nodeType} node:`, node.data.label);
+
+    // Handle condition nodes
+    if (node.data.nodeType === 'condition') {
+      const conditionPassed = this.evaluateCondition(node);
+      if (!conditionPassed) {
+        throw new Error(`Condition failed: ${node.data.label}`);
+      }
+      console.log(`✅ Condition passed: ${node.data.label}`);
+      return; // Conditions don't execute actions, just evaluate
+    }
 
     switch (nodeType) {
       case 'gmail':
