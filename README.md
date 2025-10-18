@@ -1,34 +1,65 @@
-# AI Surveillance System
+# SurveiLens - AI Surveillance System
 
-A real-time AI-powered surveillance system that combines local object detection with OpenAI GPT-4 Vision for intelligent scene understanding and automated threat detection.
+An enterprise-grade AI-powered surveillance system that combines real-time object detection with OpenAI GPT-4 Vision for intelligent scene understanding, automated threat detection, and workflow automation.
 
 ## Features
 
-- **Live Camera Feed**: Real-time object detection from webcam
-- **Video Upload Analysis**: Process pre-recorded surveillance footage with AI scene understanding
-- **Dual AI Analysis**:
-  - **Local Object Detection**: Fast, real-time bounding boxes using TensorFlow.js COCO-SSD
-  - **OpenAI Scene Understanding**: GPT-4 Vision analyzes what's actually happening in the scene
-- **Intelligent Activity Recognition**:
-  - Fighting and violence detection
-  - Shoplifting and theft behaviors
-  - Weapon detection
-  - Fire and smoke alerts
-  - Medical emergencies (person fallen)
-  - Vandalism and property damage
-  - Unusual crowding or gatherings
-- **Workflow Automation**: Automatically trigger actions based on detected events (email alerts, etc.)
-- **Real-time Scene Description**: Live narration of what's happening in the video
-- **Context-Aware Analysis**: AI understands scene progression over time
-- **Modern UI**: Clean, responsive interface with real-time updates
+### 🎥 CCTV Dashboard
+- **Multi-Camera View**: Monitor multiple camera feeds from a centralized dashboard
+- **Video Library**: Pre-loaded demo videos with automatic thumbnail generation
+- **Per-Camera Workflows**: Each camera feed saves its own automation workflows
+- **Click-to-Analyze**: Select any camera feed to view detailed AI analysis
+
+### 🤖 Dual AI Detection System
+- **Layer 1 - Local Object Detection**:
+  - Fast, real-time bounding boxes using TensorFlow.js COCO-SSD
+  - 80+ object classes detected every frame
+  - Zero API calls - runs entirely in browser
+
+- **Layer 2 - OpenAI Scene Understanding**:
+  - GPT-4 Vision analyzes scene context every 3 seconds
+  - Detects complex behaviors and threats
+  - Structured JSON output with confidence scores
+
+### 🚨 Intelligent Threat Detection
+- Fighting and violence detection
+- Robbery and theft behaviors
+- Weapon detection (guns, knives)
+- Medical emergencies (person fallen)
+- Vandalism and property damage
+- Suspicious loitering
+- Custom event detection with natural language
+
+### ⚡ Visual Workflow Builder
+- **Drag-and-Drop Interface**: Build automation workflows with no code
+- **Trigger Blocks**: Person detected, fight detected, robbery, custom events
+- **Condition Blocks**: Time of day, location zones
+- **Action Blocks**:
+  - Send Gmail alerts
+  - Send Slack messages
+  - Send SMS via Twilio
+  - Make VAPI phone calls
+  - Trigger webhooks
+  - Log to database
+  - Save screenshots
+- **Workflow Persistence**: Each camera automatically saves its workflow configuration
+
+### 📹 Video Sources
+- **Live Camera Feed**: Real-time webcam monitoring
+- **Video Upload**: Analyze pre-recorded surveillance footage
+- **Video Library**: Demo videos with automatic thumbnail generation
 
 ## Tech Stack
 
-- **Frontend**: React 19 with TypeScript
-- **AI/ML**: 
+- **Frontend**: React 19 with TypeScript, React Router for navigation
+- **AI/ML**:
   - TensorFlow.js with COCO-SSD for local object detection
-  - OpenAI GPT-4 Vision for scene understanding and context analysis
-- **Styling**: Tailwind CSS
+  - OpenAI GPT-4o-mini for scene understanding and context analysis
+- **Workflow Canvas**: ReactFlow for visual workflow builder
+- **Backend**: Express.js for OAuth and external integrations
+- **Integrations**: Google APIs (Gmail), Slack SDK, Twilio
+- **State Management**: React hooks with localStorage persistence
+- **Styling**: Tailwind CSS with custom components
 - **Build Tool**: Vite
 
 ## Getting Started
@@ -42,9 +73,10 @@ A real-time AI-powered surveillance system that combines local object detection 
 
 ### Installation
 
-1. Navigate to the project directory:
+1. Clone and navigate to the project directory:
 ```bash
-cd surveillance-ai
+git clone <repository-url>
+cd surveilens
 ```
 
 2. Install dependencies:
@@ -52,77 +84,187 @@ cd surveillance-ai
 npm install
 ```
 
-3. Start the development server:
+3. Create `.env.local` file in the root directory:
 ```bash
-npm run dev
+# Required - OpenAI API key for scene analysis
+VITE_OPENAI_API_KEY=sk-your-api-key-here
+
+# Optional - Backend integrations
+VITE_BACKEND_URL=http://localhost:3001
+
+# Gmail OAuth (optional)
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Slack integration (optional)
+SLACK_BOT_TOKEN=xoxb-your-token
+
+# Twilio SMS (optional)
+TWILIO_ACCOUNT_SID=your-sid
+TWILIO_AUTH_TOKEN=your-token
+TWILIO_PHONE_NUMBER=+1234567890
 ```
 
-4. Open your browser and navigate to `http://localhost:5173`
+4. Start the development servers:
+
+**Frontend + Backend:**
+```bash
+npm run dev:all
+```
+
+**Or start separately:**
+```bash
+# Frontend (port 5173)
+npm run dev
+
+# Backend (port 3001) - for Gmail/Slack/SMS integrations
+npm run backend
+```
+
+5. Open your browser and navigate to `http://localhost:5173`
 
 ## Usage
 
-### Setting up OpenAI API Key
+### CCTV Dashboard
 
-1. When you first load the app, you'll see a prompt to enter your OpenAI API key
-2. Enter your API key in the input field (it will be stored locally in your browser)
-3. The AI analysis will automatically start once a valid key is provided
+1. **Home Page**: Opens to the CCTV Dashboard showing all camera feeds
+2. **View Cameras**: See thumbnails of all available camera angles
+3. **Click Camera**: Select any camera to view detailed AI analysis
+4. **Navigation**: Use top nav bar to switch between Dashboard and Detection views
 
-### Live Camera Surveillance
+### Adding Demo Videos
 
-1. Click "Start Camera" to begin live monitoring
-2. The system will automatically detect objects and analyze for suspicious activities
-3. Alerts will appear in the right panel when threats are detected
+1. Place .mp4 or .mov files in `public/videos/`
+2. Update the camera list in `src/pages/VideoLibraryDashboard.tsx`:
+```typescript
+const CAMERA_FEEDS: LibraryVideo[] = [
+  {
+    id: 'camera-1',
+    name: 'Camera 1 - Front Counter',
+    videoPath: '/videos/your-video.mov',
+    description: 'Front counter and register area',
+  },
+];
+```
+3. Thumbnails are automatically generated from the videos
 
-### Video Upload Analysis
+### Building Workflows
 
-1. Switch to the "Upload Video" tab
-2. Enter your OpenAI API key if not already done
-3. Click "Upload Video" and select a surveillance video file
-4. Click play to begin analysis
-5. Watch the right panel for real-time AI scene descriptions
-6. The AI will describe what's happening in the video as it plays
-7. Suspicious activities will trigger alerts automatically
+1. **Select a Camera** from the CCTV Dashboard
+2. **Scroll to Workflow Builder** at the bottom of the page
+3. **Add Trigger Block**: Click "Add Block" → Select a trigger (e.g., "Fight Detected")
+4. **Add Condition** (optional): Add time/location conditions
+5. **Add Action Block**: Select action (e.g., "Send Gmail")
+6. **Configure Action**: Click ⚙️ on the action block to configure
+7. **Connect Blocks**: Drag from right handle to left handle to connect
+8. **Auto-Save**: Workflow automatically saves for this camera
 
-## Detection Capabilities
+### Workflow Persistence
 
-### Objects Detected
-- People
-- Bags/Backpacks
-- Vehicles
-- Animals
-- Various everyday objects (80+ classes from COCO dataset)
+- Each camera feed saves its own workflow automatically
+- Workflows are stored in browser localStorage
+- Switch between cameras - each remembers its workflow
+- Works for uploaded videos and live camera too
 
-### AI-Detected Activities (via OpenAI GPT-4 Vision)
-- **Fighting/Violence**: Physical altercations and aggressive behavior
-- **Shoplifting**: Concealment of merchandise, suspicious behavior near products
-- **Weapons**: Detection of guns, knives, or other dangerous objects
-- **Fire/Smoke**: Early detection of fire hazards
-- **Medical Emergencies**: Person fallen, unconscious individuals
-- **Vandalism**: Property damage, graffiti
-- **Crowding**: Unusual gatherings or mob formation
-- **Custom Triggers**: Configure your own workflow triggers for specific scenarios
+### Live Camera Feed
 
-## Security Alerts
+1. Navigate to Detection page
+2. Click "Camera" button
+3. Grant camera permissions
+4. AI analysis starts automatically
+5. Build workflows specific to your live camera
 
-The system generates three types of alerts:
-- **Info** (Blue): Low-priority informational alerts
-- **Warning** (Yellow): Medium-priority suspicious activities
-- **Danger** (Red): High-priority security threats requiring immediate attention
+## Architecture
+
+### Detection Pipeline
+
+```
+Video Frame (requestAnimationFrame loop)
+    ↓
+COCO-SSD Detection → DetectedObject[] → Bounding boxes drawn
+    ↓ (every 3 seconds)
+GPT-4 Vision Analysis → SceneContext
+    ↓
+generateEvents() → DetectionEvent[]
+    ↓
+checkWorkflowTriggers() → Execute matching workflows
+```
+
+### Workflow Execution
+
+- Uses BFS (Breadth-First Search) to group nodes into execution levels
+- Nodes at the same level execute in **parallel** (Promise.allSettled)
+- Visual feedback shows all executing nodes simultaneously
+- 30-second cooldown per trigger to prevent spam
+
+### Storage & Persistence
+
+- **Workflows**: Browser localStorage (per camera/video)
+- **OAuth Tokens**: Backend in-memory Map (lost on restart)
+- **Video Cache**: Blob URLs cached during session
+
+## Project Structure
+
+```
+surveilens/
+├── src/
+│   ├── components/
+│   │   ├── TopNavigation.tsx      # Navigation bar
+│   │   ├── WorkflowBuilder.tsx    # Visual workflow editor
+│   │   └── ui/                    # Reusable UI components
+│   ├── pages/
+│   │   └── VideoLibraryDashboard.tsx  # CCTV Dashboard
+│   ├── services/
+│   │   ├── detectionEngine.ts     # AI detection logic
+│   │   └── workflowEngine.ts      # Workflow execution
+│   ├── types/
+│   │   ├── detectionTypes.ts      # Detection type definitions
+│   │   └── workflowTypes.ts       # Workflow type definitions
+│   ├── App.tsx                    # Main detection page
+│   └── main.tsx                   # Router setup
+├── server/
+│   └── index.js                   # Express backend
+├── public/
+│   └── videos/                    # Demo video storage
+└── CLAUDE.md                      # AI assistant guidelines
+```
+
+## Integration Setup
+
+### Gmail OAuth
+
+1. Create project at [Google Cloud Console](https://console.cloud.google.com)
+2. Enable Gmail API
+3. Create OAuth 2.0 credentials
+4. Add to `.env.local`
+5. Configure redirect URI: `http://localhost:3001/oauth/google/callback`
+
+### Slack Integration
+
+1. Create app at [Slack API](https://api.slack.com/apps)
+2. Add Bot Token Scopes: `chat:write`, `channels:read`
+3. Install app to workspace
+4. Copy Bot Token to `.env.local`
+
+### Twilio SMS
+
+1. Sign up at [Twilio](https://www.twilio.com)
+2. Get phone number
+3. Copy Account SID, Auth Token to `.env.local`
 
 ## Performance Notes
 
-- The object detection model runs entirely in the browser using TensorFlow.js
-- Processing speed depends on your device's capabilities
-- For best performance, use a modern browser and dedicated GPU
+- **Object Detection**: Runs entirely in browser, ~30 FPS on modern hardware
+- **AI Analysis**: Rate-limited to every 3 seconds to manage API costs
+- **Workflow Execution**: Parallel execution for optimal performance
+- **Best Performance**: Modern browser with dedicated GPU
 
-## Future Improvements
+## Browser Support
 
-- Add facial recognition for known individuals
-- Implement zone-based monitoring (restricted areas)
-- Add network storage for alert history
-- Integrate with security systems and IoT devices
-- Support for multiple camera feeds
-- Advanced ML models for better shoplifting detection
+- Chrome/Edge 90+ (recommended)
+- Firefox 88+
+- Safari 14+
+- Requires WebRTC for live camera
 
 ## License
 

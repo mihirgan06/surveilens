@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { detectionEngine } from './services/detectionEngine';
 import type { DetectedObject, DetectionEvent, SceneContext } from './types/detectionTypes';
 import WorkflowBuilder from './components/WorkflowBuilder';
@@ -10,8 +11,52 @@ import { workflowEngine } from './services/workflowEngine';
 import { ToastContainer, useToast } from './components/ui/toast';
 import type { Node, Edge } from 'reactflow';
 
+// Helper functions for workflow persistence
+const saveWorkflowToStorage = (videoId: string, nodes: Node[], edges: Edge[]) => {
+  try {
+    // Clean nodes: remove non-serializable data (icon components, callbacks)
+    const cleanNodes = nodes.map(node => ({
+      ...node,
+      data: {
+        ...node.data,
+        icon: undefined,  // Remove icon component
+        onDelete: undefined,  // Remove callbacks
+        onSettings: undefined,
+        isExecuting: undefined,  // Remove runtime state
+        isTriggered: undefined,
+      }
+    }));
+
+    const workflows = JSON.parse(localStorage.getItem('surveilens_workflows') || '{}');
+    workflows[videoId] = { nodes: cleanNodes, edges, timestamp: Date.now() };
+    localStorage.setItem('surveilens_workflows', JSON.stringify(workflows));
+    console.log('💾 Workflow saved for:', videoId, '| Nodes:', nodes.length, '| Edges:', edges.length);
+  } catch (err) {
+    console.error('❌ Failed to save workflow:', err);
+  }
+};
+
+const loadWorkflowFromStorage = (videoId: string): { nodes: Node[]; edges: Edge[] } | null => {
+  try {
+    const workflows = JSON.parse(localStorage.getItem('surveilens_workflows') || '{}');
+    const workflow = workflows[videoId];
+    if (workflow) {
+      console.log('📂 Workflow loaded for:', videoId, '| Nodes:', workflow.nodes.length, '| Edges:', workflow.edges.length);
+      // Note: Icon and callbacks will be re-added by WorkflowBuilder when creating nodes
+      return { nodes: workflow.nodes, edges: workflow.edges };
+    } else {
+      console.log('📂 No saved workflow found for:', videoId);
+    }
+  } catch (err) {
+    console.error('❌ Failed to load workflow:', err);
+  }
+  return null;
+};
+
 function App() {
+  const location = useLocation();
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [currentVideoId, setCurrentVideoId] = useState<string>('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [objects, setObjects] = useState<DetectedObject[]>([]);
@@ -24,13 +69,15 @@ function App() {
   const [workflowNodes, setWorkflowNodes] = useState<Node[]>([]);
   const [workflowEdges, setWorkflowEdges] = useState<Edge[]>([]);
   const [executingNodes, setExecutingNodes] = useState<string[]>([]);
-  
+
   const { toasts, addToast, removeToast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoUrlRef = useRef<string>('');
   const detectionLoopRef = useRef<number | undefined>(undefined);
+  // Cache blob URLs to avoid re-fetching and prevent ERR_FILE_NOT_FOUND errors
+  const blobCacheRef = useRef<Map<string, string>>(new Map());
 
   const hasApiKey = !!import.meta.env.VITE_OPENAI_API_KEY && 
                     import.meta.env.VITE_OPENAI_API_KEY !== 'your_openai_api_key_here';
@@ -67,11 +114,37 @@ function App() {
       if (cameraStream) {
         stopLiveCamera();
       }
-      
-      if (videoUrlRef.current) {
-        URL.revokeObjectURL(videoUrlRef.current);
+
+      // Generate video ID from file name
+      const videoId = `upload_${file.name}`;
+      console.log('📤 Uploaded file:', file.name, '→ VideoID:', videoId);
+
+      // Check if we already have this file cached
+      let blobUrl = blobCacheRef.current.get(videoId);
+
+      if (!blobUrl) {
+        blobUrl = URL.createObjectURL(file);
+        blobCacheRef.current.set(videoId, blobUrl);
       }
-      videoUrlRef.current = URL.createObjectURL(file);
+
+      videoUrlRef.current = blobUrl;
+
+      // Load saved workflow if exists
+      const savedWorkflow = loadWorkflowFromStorage(videoId);
+
+      // Set video ID BEFORE setting workflow nodes/edges
+      setCurrentVideoId(videoId);
+
+      if (savedWorkflow) {
+        console.log('✅ Restoring saved workflow');
+        setWorkflowNodes(savedWorkflow.nodes);
+        setWorkflowEdges(savedWorkflow.edges);
+      } else {
+        console.log('🆕 Starting with empty workflow');
+        setWorkflowNodes([]);
+        setWorkflowEdges([]);
+      }
+
       setVideoFile(file);
       setSceneContext(null);
       setRecentEvents([]);
@@ -81,19 +154,141 @@ function App() {
     }
   };
 
+  const handleLibraryVideoSelect = async (videoPath: string) => {
+    try {
+      // Stop camera if active
+      if (cameraStream) {
+        stopLiveCamera();
+      }
+
+      // Generate video ID from path (use path as unique identifier for library videos)
+      const videoId = `library_${videoPath}`;
+      console.log('🎬 Loading video:', videoPath, '→ VideoID:', videoId);
+
+      // Check if we already have this video cached
+      let blobUrl = blobCacheRef.current.get(videoPath);
+      let file: File;
+
+      if (!blobUrl) {
+        console.log('📥 Fetching video from:', videoPath);
+        // Fetch the video from the public folder
+        const response = await fetch(videoPath);
+        if (!response.ok) {
+          throw new Error(`Failed to load video: ${response.statusText}`);
+        }
+
+        // Convert to blob and create a File object
+        const blob = await response.blob();
+        const fileName = videoPath.split('/').pop() || 'library-video.mp4';
+        file = new File([blob], fileName, { type: blob.type });
+
+        // Create and cache blob URL
+        blobUrl = URL.createObjectURL(file);
+        blobCacheRef.current.set(videoPath, blobUrl);
+        console.log('💾 Video cached:', videoPath);
+      } else {
+        console.log('✅ Using cached video:', videoPath);
+        // Re-fetch blob to create File object (we need the File object for state)
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
+        const fileName = videoPath.split('/').pop() || 'library-video.mp4';
+        file = new File([blob], fileName, { type: blob.type });
+      }
+
+      // Load saved workflow if exists
+      const savedWorkflow = loadWorkflowFromStorage(videoId);
+
+      // Set video ID BEFORE setting workflow nodes/edges
+      setCurrentVideoId(videoId);
+
+      if (savedWorkflow) {
+        console.log('✅ Restoring saved workflow');
+        setWorkflowNodes(savedWorkflow.nodes);
+        setWorkflowEdges(savedWorkflow.edges);
+      } else {
+        console.log('🆕 Starting with empty workflow');
+        setWorkflowNodes([]);
+        setWorkflowEdges([]);
+      }
+
+      // Set video URL and states
+      videoUrlRef.current = blobUrl;
+      setVideoFile(file);
+      setSceneContext(null);
+      setRecentEvents([]);
+      setObjects([]);
+      setError('');
+      detectionEngine.clearHistory();
+    } catch (err) {
+      console.error('Error loading library video:', err);
+      setError('Failed to load video from library');
+    }
+  };
+
+  // Handle video from library dashboard (via route state)
+  useEffect(() => {
+    const state = location.state as { videoPath?: string } | null;
+    if (state?.videoPath) {
+      handleLibraryVideoSelect(state.videoPath);
+    }
+  }, [location.state]);
+
+  // Save workflow to localStorage whenever it changes
+  useEffect(() => {
+    console.log('🔄 Workflow state changed - VideoID:', currentVideoId, '| Nodes:', workflowNodes.length, '| Edges:', workflowEdges.length);
+
+    if (currentVideoId) {
+      // Save even if empty (to persist cleared workflows)
+      saveWorkflowToStorage(currentVideoId, workflowNodes, workflowEdges);
+    } else {
+      console.log('⚠️ No currentVideoId set, skipping save');
+    }
+  }, [workflowNodes, workflowEdges, currentVideoId]);
+
+  // Cleanup blob URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Cleaning up blob URLs...');
+      blobCacheRef.current.forEach((blobUrl) => {
+        URL.revokeObjectURL(blobUrl);
+      });
+      blobCacheRef.current.clear();
+    };
+  }, []);
+
   const startLiveCamera = async () => {
     try {
       console.log('📷 Requesting camera access...');
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
           width: { ideal: 1280 },
           height: { ideal: 720 },
           facingMode: 'user'
-        } 
+        }
       });
       console.log('✅ Camera access granted', stream);
       console.log('Stream tracks:', stream.getTracks());
-      
+
+      // Generate video ID for live camera
+      const videoId = 'live_camera';
+      console.log('📹 Starting live camera → VideoID:', videoId);
+
+      // Load saved workflow if exists
+      const savedWorkflow = loadWorkflowFromStorage(videoId);
+
+      // Set video ID BEFORE setting workflow nodes/edges
+      setCurrentVideoId(videoId);
+
+      if (savedWorkflow) {
+        console.log('✅ Restoring saved workflow');
+        setWorkflowNodes(savedWorkflow.nodes);
+        setWorkflowEdges(savedWorkflow.edges);
+      } else {
+        console.log('🆕 Starting with empty workflow');
+        setWorkflowNodes([]);
+        setWorkflowEdges([]);
+      }
+
       setVideoFile(null);
       setSceneContext(null);
       setRecentEvents([]);
@@ -461,8 +656,8 @@ function App() {
                       className="hidden"
                       id="video-upload"
                     />
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       variant="ghost"
                       onClick={() => document.getElementById('video-upload')?.click()}
                       className="text-blue-400 hover:text-blue-300 hover:bg-slate-800/50"
@@ -470,8 +665,8 @@ function App() {
                       <Upload className="h-4 w-4 mr-1.5" />
                       Upload
                     </Button>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       variant="ghost"
                       onClick={startLiveCamera}
                       className="text-blue-400 hover:text-blue-300 hover:bg-slate-800/50"
@@ -702,7 +897,9 @@ function App() {
 
       {/* Workflow Builder */}
       <div className="max-w-[1800px] mx-auto animate-slide-in h-[calc(50vh-70px)]">
-        <WorkflowBuilder 
+        <WorkflowBuilder
+          initialNodes={workflowNodes}
+          initialEdges={workflowEdges}
           onWorkflowChange={(nodes, edges) => {
             console.log('🔄 Workflow changed:', nodes.length, 'nodes,', edges.length, 'edges');
             setWorkflowNodes(nodes);
