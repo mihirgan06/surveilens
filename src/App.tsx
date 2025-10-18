@@ -335,6 +335,16 @@ function App() {
             if (context) {
               console.log('✅ Got AI Analysis:', context);
               setSceneContext(context);
+              
+              // Check workflow triggers with NEW scene context
+              const latestEvents = detectionEngine.getRecentEvents(30);
+              if (workflowNodesRef.current.length > 0 && latestEvents.length > 0) {
+                const triggerCount = workflowNodesRef.current.filter(n => n.data.nodeType === 'trigger').length;
+                if (triggerCount > 0) {
+                  console.log('✅ Calling checkWorkflowTriggers with NEW scene context and', latestEvents.length, 'events');
+                  checkWorkflowTriggers(latestEvents, context);
+                }
+              }
             } else {
               console.log('⏳ Analysis skipped (rate limited)');
             }
