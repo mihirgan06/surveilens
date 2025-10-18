@@ -155,11 +155,18 @@ const ACTION_BLOCKS = [
 interface WorkflowBuilderProps {
   onWorkflowChange?: (nodes: Node[], edges: Edge[]) => void;
   executingNodes?: string[];
+  initialNodes?: Node[];
+  initialEdges?: Edge[];
 }
 
-function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: WorkflowBuilderProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+function WorkflowBuilderInner({ 
+  onWorkflowChange, 
+  executingNodes = [],
+  initialNodes = [],
+  initialEdges = []
+}: WorkflowBuilderProps) {
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [showBlockPanel, setShowBlockPanel] = useState(false);
   const [showGmailConfig, setShowGmailConfig] = useState(false);
   const [gmailConfigNodeId, setGmailConfigNodeId] = useState<string>('');
@@ -215,9 +222,39 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     enabled: true
   });
 
-  // Notify parent of workflow changes
+  // Refs for tracking previous props and sync state
+  const prevInitialNodesRef = useRef<Node[]>([]);
+  const prevInitialEdgesRef = useRef<Edge[]>([]);
+  const isSyncingRef = useRef(false);
+
+  // Sync internal state with initialNodes/initialEdges when they change (but prevent infinite loop)
   useEffect(() => {
-    if (onWorkflowChange) {
+    const nodesChanged = JSON.stringify(initialNodes) !== JSON.stringify(prevInitialNodesRef.current);
+    const edgesChanged = JSON.stringify(initialEdges) !== JSON.stringify(prevInitialEdgesRef.current);
+
+    if (nodesChanged || edgesChanged) {
+      console.log('📥 Syncing with new initial workflow - Nodes:', initialNodes.length, '| Edges:', initialEdges.length);
+      
+      // Set sync flag to prevent triggering onWorkflowChange during sync
+      isSyncingRef.current = true;
+      
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+      
+      // Update refs
+      prevInitialNodesRef.current = initialNodes;
+      prevInitialEdgesRef.current = initialEdges;
+      
+      // Reset flag after sync completes
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 0);
+    }
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  // Notify parent of workflow changes (but not during sync to prevent loops)
+  useEffect(() => {
+    if (onWorkflowChange && !isSyncingRef.current) {
       onWorkflowChange(nodes, edges);
     }
   }, [nodes, edges, onWorkflowChange]);
