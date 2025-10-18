@@ -10,7 +10,6 @@ import ReactFlow, {
   MarkerType,
   Position,
   Handle,
-  useReactFlow,
   ReactFlowProvider,
 } from 'reactflow';
 import { useNodesState, useEdgesState } from '@reactflow/core';
@@ -18,7 +17,7 @@ import 'reactflow/dist/style.css';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Plus, Trash2, Workflow as WorkflowIcon, Zap, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings } from 'lucide-react';
+import { Plus, Trash2, Workflow as WorkflowIcon, Zap, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings, Clock, MapPin, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // Custom Node Component with side handles, settings, and delete button
@@ -81,7 +80,7 @@ function CustomNode({ data, id }: { data: any; id: string }) {
           </Badge>
         </div>
         <div className="flex gap-0.5">
-          {(data.nodeType === 'action' || (data.nodeType === 'trigger' && data.blockType === 'custom_event')) && (
+          {(data.nodeType === 'action' || data.nodeType === 'condition' || (data.nodeType === 'trigger' && data.blockType === 'custom_event')) && (
             <button
               onClick={handleSettings}
               className="nodrag nopan bg-slate-700/60 hover:bg-slate-600 rounded p-0.5 transition-colors cursor-pointer"
@@ -130,6 +129,10 @@ const TRIGGER_BLOCKS = [
   { id: 'custom_event', label: 'Custom Event', icon: Zap },
 ];
 
+const CONDITION_BLOCKS = [
+  { id: 'time_condition', label: 'Time Condition', icon: Clock, color: '#fcd34d' }, // Yellow
+  { id: 'location_condition', label: 'Location Condition', icon: MapPin, color: '#fbbf24' }, // Amber
+];
 
 const ACTION_BLOCKS = [
   { id: 'gmail', label: 'Send Gmail', icon: Mail, color: '#fca5a5' }, // Soft red
@@ -177,7 +180,24 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
     to: '',
     body: ''
   });
-  const { project } = useReactFlow();
+  const [showTimeConditionConfig, setShowTimeConditionConfig] = useState(false);
+  const [timeConditionConfigNodeId, setTimeConditionConfigNodeId] = useState<string>('');
+  const [timeConditionConfig, setTimeConditionConfig] = useState({
+    startTime: '09:00',
+    endTime: '17:00',
+    daysOfWeek: [1, 2, 3, 4, 5], // Monday to Friday by default
+    enabled: true
+  });
+  const [showLocationConditionConfig, setShowLocationConditionConfig] = useState(false);
+  const [locationConditionConfigNodeId, setLocationConditionConfigNodeId] = useState<string>('');
+  const [locationConditionConfig, setLocationConditionConfig] = useState({
+    locationType: 'zone', // 'zone' or 'gps'
+    zoneName: 'Front Door',
+    latitude: 0,
+    longitude: 0,
+    radius: 100, // meters
+    enabled: true
+  });
 
   // Notify parent of workflow changes
   useEffect(() => {
@@ -258,7 +278,7 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
 
   const handleNodeSettings = useCallback((nodeId: string, blockType: string, config: any) => {
     console.log('🔧 Settings clicked for node:', nodeId, 'blockType:', blockType);
-    
+
     if (blockType === 'gmail') {
       console.log('📧 Opening Gmail config');
       setGmailConfigNodeId(nodeId);
@@ -281,47 +301,93 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       setCustomEventConfigNodeId(nodeId);
       setCustomEventConfig(config || { condition: '', fuzzyThreshold: 70 });
       setShowCustomEventConfig(true);
+    } else if (blockType === 'time_condition') {
+      console.log('⏰ Opening Time Condition config');
+      setTimeConditionConfigNodeId(nodeId);
+      setTimeConditionConfig(config || { startTime: '09:00', endTime: '17:00', daysOfWeek: [1, 2, 3, 4, 5], enabled: true });
+      setShowTimeConditionConfig(true);
+    } else if (blockType === 'location_condition') {
+      console.log('📍 Opening Location Condition config');
+      setLocationConditionConfigNodeId(nodeId);
+      setLocationConditionConfig(config || { locationType: 'zone', zoneName: 'Front Door', latitude: 0, longitude: 0, radius: 100, enabled: true });
+      setShowLocationConditionConfig(true);
     } else {
       console.log('⚠️ Unknown block type:', blockType);
     }
   }, []);
 
   const addBlock = (
-    blockType: string, 
-    blockLabel: string, 
-    Icon: any, 
+    blockType: string,
+    blockLabel: string,
+    Icon: any,
     nodeType: 'trigger' | 'condition' | 'action',
     customColor?: string
   ) => {
     const colors = {
-      trigger: { 
-        bg: 'linear-gradient(135deg, #6ee7b7 0%, #34d399 100%)', 
+      trigger: {
+        bg: 'linear-gradient(135deg, #6ee7b7 0%, #34d399 100%)',
         border: '#6ee7b7',
         badge: 'TRIGGER'
       },
-      condition: { 
-        bg: 'linear-gradient(135deg, #fcd34d 0%, #fbbf24 100%)', 
+      condition: {
+        bg: 'linear-gradient(135deg, #fcd34d 0%, #fbbf24 100%)',
         border: '#fcd34d',
         badge: 'CONDITION'
       },
-      action: { 
-        bg: customColor ? `linear-gradient(135deg, ${customColor}cc 0%, ${customColor}99 100%)` : 'linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%)', 
+      action: {
+        bg: customColor ? `linear-gradient(135deg, ${customColor}cc 0%, ${customColor}99 100%)` : 'linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%)',
         border: customColor ? `${customColor}cc` : '#93c5fd',
         badge: 'ACTION'
       }
     };
 
-    // Get viewport center position
-    const viewportCenter = project({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    const randomOffset = { x: Math.random() * 100 - 50, y: Math.random() * 100 - 50 };
-    
+    // Find an empty spot in the visible viewport
+    const findEmptyPosition = () => {
+      const NODE_WIDTH = 85;
+      const NODE_HEIGHT = 50;
+      const PADDING = 20;
+      const GRID_SIZE = 120; // Space between potential positions
+
+      // Try positions in a grid pattern, starting from top-left of viewport
+      const startX = 50;
+      const startY = 50;
+      const maxColumns = 6;
+      const maxRows = 4;
+
+      for (let row = 0; row < maxRows; row++) {
+        for (let col = 0; col < maxColumns; col++) {
+          const testX = startX + (col * GRID_SIZE);
+          const testY = startY + (row * GRID_SIZE);
+
+          // Check if this position overlaps with any existing node
+          const overlaps = nodes.some(node => {
+            const dx = Math.abs(node.position.x - testX);
+            const dy = Math.abs(node.position.y - testY);
+            return dx < (NODE_WIDTH + PADDING) && dy < (NODE_HEIGHT + PADDING);
+          });
+
+          if (!overlaps) {
+            return { x: testX, y: testY };
+          }
+        }
+      }
+
+      // If no empty spot found, place it offset from the last node or use default
+      if (nodes.length > 0) {
+        const lastNode = nodes[nodes.length - 1];
+        return { x: lastNode.position.x + 150, y: lastNode.position.y + 50 };
+      }
+
+      // Default position if no nodes exist
+      return { x: 100, y: 100 };
+    };
+
+    const position = findEmptyPosition();
+
     const newNode: Node = {
       id: `${blockType}_${Date.now()}`,
       type: 'custom',
-      position: { 
-        x: viewportCenter.x + randomOffset.x, 
-        y: viewportCenter.y + randomOffset.y 
-      },
+      position,
       data: { 
         label: blockLabel,
         icon: Icon,
@@ -438,12 +504,12 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       alert('Please enter a phone number');
       return;
     }
-    
+
     if (!smsConfig.body?.trim()) {
       alert('Please enter a message body');
       return;
     }
-    
+
     setNodes((nds) =>
       nds.map((node) =>
         node.id === smsConfigNodeId
@@ -452,6 +518,28 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
       )
     );
     setShowSmsConfig(false);
+  };
+
+  const saveTimeConditionConfig = () => {
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === timeConditionConfigNodeId
+          ? { ...node, data: { ...node.data, config: timeConditionConfig } }
+          : node
+      )
+    );
+    setShowTimeConditionConfig(false);
+  };
+
+  const saveLocationConditionConfig = () => {
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === locationConditionConfigNodeId
+          ? { ...node, data: { ...node.data, config: locationConditionConfig } }
+          : node
+      )
+    );
+    setShowLocationConditionConfig(false);
   };
 
   return (
@@ -506,6 +594,27 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
                       className="w-full justify-start hover:bg-green-500/20 hover:border-green-500/40 h-8 text-xs"
                     >
                       <block.icon className="w-3.5 h-3.5 mr-2" />
+                      {block.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Filter className="h-4 w-4 text-yellow-400" />
+                  <h3 className="font-semibold text-yellow-400 text-sm">Condition Blocks</h3>
+                </div>
+                <div className="space-y-1.5">
+                  {CONDITION_BLOCKS.map((block) => (
+                    <Button
+                      key={block.id}
+                      onClick={() => addBlock(block.id, block.label, block.icon, 'condition', block.color)}
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start hover:bg-yellow-500/20 hover:border-yellow-500/40 h-8 text-xs"
+                    >
+                      <block.icon className="w-3.5 h-3.5 mr-2" style={{ color: block.color }} />
                       {block.label}
                     </Button>
                   ))}
@@ -851,6 +960,302 @@ function WorkflowBuilderInner({ onWorkflowChange, executingNodes = [] }: Workflo
               <Button 
                 onClick={() => setShowSmsConfig(false)} 
                 variant="ghost" 
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+    {/* Time Condition Configuration Modal */}
+    {showTimeConditionConfig && (
+      <div
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowTimeConditionConfig(false)}
+      >
+        <Card
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-yellow-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <CardHeader className="border-b border-yellow-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-yellow-400" />
+                Configure Time Condition
+              </CardTitle>
+              <button
+                onClick={() => setShowTimeConditionConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 pb-4">
+            {/* Time Range */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Start Time</label>
+                <input
+                  type="time"
+                  value={timeConditionConfig.startTime}
+                  onChange={(e) => setTimeConditionConfig({ ...timeConditionConfig, startTime: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">End Time</label>
+                <input
+                  type="time"
+                  value={timeConditionConfig.endTime}
+                  onChange={(e) => setTimeConditionConfig({ ...timeConditionConfig, endTime: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+                />
+              </div>
+            </div>
+
+            {/* Days of Week */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Active Days</label>
+              <div className="grid grid-cols-7 gap-2">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                  <button
+                    key={day}
+                    onClick={() => {
+                      const days = timeConditionConfig.daysOfWeek || [];
+                      const newDays = days.includes(index)
+                        ? days.filter(d => d !== index)
+                        : [...days, index].sort();
+                      setTimeConditionConfig({ ...timeConditionConfig, daysOfWeek: newDays });
+                    }}
+                    className={cn(
+                      "px-2 py-1.5 text-xs font-medium rounded transition-colors",
+                      (timeConditionConfig.daysOfWeek || []).includes(index)
+                        ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/40"
+                        : "bg-slate-800/50 text-slate-400 border border-slate-700 hover:border-slate-600"
+                    )}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400">Select which days this condition is active</p>
+            </div>
+
+            {/* Enable Toggle */}
+            <div className="flex items-center justify-between p-3 bg-slate-800/50 border border-slate-700 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-slate-300">Enable Condition</p>
+                <p className="text-xs text-slate-400">Workflow will only continue if time matches</p>
+              </div>
+              <button
+                onClick={() => setTimeConditionConfig({ ...timeConditionConfig, enabled: !timeConditionConfig.enabled })}
+                className={cn(
+                  "relative w-12 h-6 rounded-full transition-colors",
+                  timeConditionConfig.enabled ? "bg-yellow-500" : "bg-slate-600"
+                )}
+              >
+                <div className={cn(
+                  "absolute top-1 w-4 h-4 bg-white rounded-full transition-transform",
+                  timeConditionConfig.enabled ? "translate-x-7" : "translate-x-1"
+                )} />
+              </button>
+            </div>
+
+            {/* Example */}
+            <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+              <p className="text-xs font-medium text-yellow-400 mb-1">Example:</p>
+              <p className="text-xs text-slate-300">
+                Workflow will only execute between {timeConditionConfig.startTime} and {timeConditionConfig.endTime} on selected days
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={saveTimeConditionConfig}
+                className="flex-1"
+                size="sm"
+              >
+                Save
+              </Button>
+              <Button
+                onClick={() => setShowTimeConditionConfig(false)}
+                variant="ghost"
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+    {/* Location Condition Configuration Modal */}
+    {showLocationConditionConfig && (
+      <div
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[9999]"
+        onClick={() => setShowLocationConditionConfig(false)}
+      >
+        <Card
+          className="w-[450px] max-h-[80vh] overflow-y-auto border-yellow-500/30 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <CardHeader className="border-b border-yellow-500/20 pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MapPin className="h-4 w-4 text-yellow-400" />
+                Configure Location Condition
+              </CardTitle>
+              <button
+                onClick={() => setShowLocationConditionConfig(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 pb-4">
+            {/* Location Type */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Location Type</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setLocationConditionConfig({ ...locationConditionConfig, locationType: 'zone' })}
+                  className={cn(
+                    "px-3 py-2 text-sm font-medium rounded transition-colors",
+                    locationConditionConfig.locationType === 'zone'
+                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/40"
+                      : "bg-slate-800/50 text-slate-400 border border-slate-700 hover:border-slate-600"
+                  )}
+                >
+                  Named Zone
+                </button>
+                <button
+                  onClick={() => setLocationConditionConfig({ ...locationConditionConfig, locationType: 'gps' })}
+                  className={cn(
+                    "px-3 py-2 text-sm font-medium rounded transition-colors",
+                    locationConditionConfig.locationType === 'gps'
+                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/40"
+                      : "bg-slate-800/50 text-slate-400 border border-slate-700 hover:border-slate-600"
+                  )}
+                >
+                  GPS Coordinates
+                </button>
+              </div>
+            </div>
+
+            {/* Zone Name (if zone type) */}
+            {locationConditionConfig.locationType === 'zone' && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">Zone Name</label>
+                <select
+                  value={locationConditionConfig.zoneName}
+                  onChange={(e) => setLocationConditionConfig({ ...locationConditionConfig, zoneName: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+                >
+                  <option value="Front Door">Front Door</option>
+                  <option value="Parking Lot">Parking Lot</option>
+                  <option value="Loading Dock">Loading Dock</option>
+                  <option value="Cash Register">Cash Register</option>
+                  <option value="Storage Room">Storage Room</option>
+                  <option value="Office">Office</option>
+                </select>
+                <p className="text-xs text-slate-400">Select a predefined location zone</p>
+              </div>
+            )}
+
+            {/* GPS Coordinates (if GPS type) */}
+            {locationConditionConfig.locationType === 'gps' && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-300">Latitude</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={locationConditionConfig.latitude}
+                      onChange={(e) => setLocationConditionConfig({ ...locationConditionConfig, latitude: parseFloat(e.target.value) || 0 })}
+                      placeholder="37.7749"
+                      className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-300">Longitude</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={locationConditionConfig.longitude}
+                      onChange={(e) => setLocationConditionConfig({ ...locationConditionConfig, longitude: parseFloat(e.target.value) || 0 })}
+                      placeholder="-122.4194"
+                      className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300">Radius (meters)</label>
+                  <input
+                    type="number"
+                    value={locationConditionConfig.radius}
+                    onChange={(e) => setLocationConditionConfig({ ...locationConditionConfig, radius: parseInt(e.target.value) || 100 })}
+                    className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500"
+                  />
+                  <p className="text-xs text-slate-400">Trigger within this distance from coordinates</p>
+                </div>
+              </>
+            )}
+
+            {/* Enable Toggle */}
+            <div className="flex items-center justify-between p-3 bg-slate-800/50 border border-slate-700 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-slate-300">Enable Condition</p>
+                <p className="text-xs text-slate-400">Workflow will only continue if location matches</p>
+              </div>
+              <button
+                onClick={() => setLocationConditionConfig({ ...locationConditionConfig, enabled: !locationConditionConfig.enabled })}
+                className={cn(
+                  "relative w-12 h-6 rounded-full transition-colors",
+                  locationConditionConfig.enabled ? "bg-yellow-500" : "bg-slate-600"
+                )}
+              >
+                <div className={cn(
+                  "absolute top-1 w-4 h-4 bg-white rounded-full transition-transform",
+                  locationConditionConfig.enabled ? "translate-x-7" : "translate-x-1"
+                )} />
+              </button>
+            </div>
+
+            {/* Example */}
+            <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+              <p className="text-xs font-medium text-yellow-400 mb-1">Example:</p>
+              <p className="text-xs text-slate-300">
+                {locationConditionConfig.locationType === 'zone'
+                  ? `Workflow will only execute when camera is in "${locationConditionConfig.zoneName}" zone`
+                  : `Workflow will only execute within ${locationConditionConfig.radius}m of the specified coordinates`
+                }
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={saveLocationConditionConfig}
+                className="flex-1"
+                size="sm"
+              >
+                Save
+              </Button>
+              <Button
+                onClick={() => setShowLocationConditionConfig(false)}
+                variant="ghost"
                 className="flex-1"
                 size="sm"
               >
