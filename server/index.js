@@ -315,7 +315,7 @@ app.post('/vapi/call', async (req, res) => {
       customer: {
         number: phoneNumber,
       },
-      assistantId: '689ee057-17d1-4ab0-81ba-c8f9a21a7783', // Riley assistant (confirmed working)
+      assistantId: '11182291-6fa9-46d2-8127-5a8b4536e00e', // Riley assistant (new VAPI account)
       // Override Riley's default message with custom surveillance alert
       assistantOverrides: {
         firstMessage: message
