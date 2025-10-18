@@ -212,8 +212,12 @@ Respond with ONLY "YES" or "NO".`;
         const node = connectedNodes[i];
         console.log(`\n🔄 [${i + 1}/${connectedNodes.length}] Executing action: ${node.data.label} (${node.data.blockType})`);
         
+        // Show this node as executing
         execution.activeNodes = [node.id];
         this.notifyExecutionUpdate(execution);
+        
+        // Wait for visual feedback to show
+        await new Promise(resolve => setTimeout(resolve, 300));
         
         try {
           await this.executeNode(node, event);
@@ -223,8 +227,8 @@ Respond with ONLY "YES" or "NO".`;
           // Continue with other nodes even if one fails
         }
         
-        // Wait a bit for visual feedback
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Keep the node highlighted for a moment after completion
+        await new Promise(resolve => setTimeout(resolve, 700));
       }
 
       execution.status = 'completed';
