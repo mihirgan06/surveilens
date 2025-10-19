@@ -169,16 +169,27 @@ function App() {
     }
   };
 
+  // Track which video is currently being loaded to prevent race conditions
+  const loadingVideoRef = useRef<string | null>(null);
+
   const handleLibraryVideoSelect = async (videoPath: string) => {
     try {
+      // Generate video ID from path (use path as unique identifier for library videos)
+      const videoId = `library_${videoPath}`;
+
+      // Prevent concurrent loads of the same video
+      if (loadingVideoRef.current === videoId) {
+        console.log('⏭️ Already loading this video, skipping duplicate call');
+        return;
+      }
+
+      loadingVideoRef.current = videoId;
+      console.log('🎬 Loading video:', videoPath, '→ VideoID:', videoId);
+
       // Stop camera if active
       if (cameraStream) {
         stopLiveCamera();
       }
-
-      // Generate video ID from path (use path as unique identifier for library videos)
-      const videoId = `library_${videoPath}`;
-      console.log('🎬 Loading video:', videoPath, '→ VideoID:', videoId);
 
       // Check if we already have this video cached
       let blobUrl = blobCacheRef.current.get(videoPath);
@@ -212,10 +223,10 @@ function App() {
 
       // Load saved workflow if exists
       const savedWorkflow = loadWorkflowFromStorage(videoId);
-      
+
       // Set video ID BEFORE setting workflow nodes/edges
       setCurrentVideoId(videoId);
-      
+
       if (savedWorkflow && savedWorkflow.nodes.length > 0) {
         console.log('✅ Restoring saved workflow with', savedWorkflow.nodes.length, 'nodes');
         setWorkflowNodes(savedWorkflow.nodes);
@@ -234,16 +245,25 @@ function App() {
       setObjects([]);
       setError('');
       detectionEngine.clearHistory();
+
+      // Reset loading flag
+      loadingVideoRef.current = null;
     } catch (err) {
       console.error('Error loading library video:', err);
       setError('Failed to load video from library');
+      loadingVideoRef.current = null;
     }
   };
+
+  // Track if we've already loaded the initial video to prevent double-loading
+  const initialVideoLoadedRef = useRef<string | null>(null);
 
   // Handle video from library dashboard (via route state)
   useEffect(() => {
     const state = location.state as { videoPath?: string } | null;
-    if (state?.videoPath) {
+    if (state?.videoPath && initialVideoLoadedRef.current !== state.videoPath) {
+      console.log('🎬 Route state detected, loading video:', state.videoPath);
+      initialVideoLoadedRef.current = state.videoPath;
       handleLibraryVideoSelect(state.videoPath);
     }
   }, [location.state]);
@@ -410,9 +430,7 @@ function App() {
 
   // Track which events have already triggered workflows
   const triggeredEventsRef = useRef<Set<number>>(new Set());
-  const workflowNodesRef = useRef<Node[]>([]);
-  const workflowEdgesRef = useRef<Edge[]>([]);
-  
+
   // Cooldown tracking: Map of triggerNodeId -> last trigger timestamp
   const triggerCooldownRef = useRef<Map<string, number>>(new Map());
   const TRIGGER_COOLDOWN_MS = 60000; // 60 second cooldown between triggers to prevent spam calls
@@ -943,9 +961,31 @@ function App() {
           initialNodes={workflowNodes}
           initialEdges={workflowEdges}
           onWorkflowChange={(nodes, edges) => {
-            console.log('🔄 Workflow changed:', nodes.length, 'nodes,', edges.length, 'edges');
-            setWorkflowNodes(nodes);
-            setWorkflowEdges(edges);
+            console.log('🔄 Workflow changed from WorkflowBuilder:', nodes.length, 'nodes,', edges.length, 'edges');
+
+            // Deep comparison: only check structural changes (id, position, config), ignore functions/icons
+            const structurallyEqual = (a: Node[], b: Node[]) => {
+              if (a.length !== b.length) return false;
+              return a.every((nodeA, i) => {
+                const nodeB = b[i];
+                return nodeA.id === nodeB.id &&
+                       nodeA.type === nodeB.type &&
+                       JSON.stringify(nodeA.position) === JSON.stringify(nodeB.position) &&
+                       JSON.stringify(nodeA.data?.config) === JSON.stringify(nodeB.data?.config) &&
+                       nodeA.data?.blockType === nodeB.data?.blockType;
+              });
+            };
+
+            const nodesEqual = structurallyEqual(nodes, workflowNodes);
+            const edgesEqual = JSON.stringify(edges) === JSON.stringify(workflowEdges);
+
+            if (!nodesEqual || !edgesEqual) {
+              console.log('✅ Structural changes detected, updating App state');
+              setWorkflowNodes(nodes);
+              setWorkflowEdges(edges);
+            } else {
+              console.log('⏭️ No structural changes, skipping App state update');
+            }
           }}
           executingNodes={executingNodes}
         />

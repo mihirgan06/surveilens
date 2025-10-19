@@ -233,7 +233,10 @@ function WorkflowBuilderInner({
   // Notify parent of workflow changes (but not during sync to prevent loops)
   useEffect(() => {
     if (onWorkflowChange && !isSyncingRef.current) {
+      console.log('📤 Notifying parent of workflow change:', nodes.length, 'nodes,', edges.length, 'edges');
       onWorkflowChange(nodes, edges);
+    } else if (isSyncingRef.current) {
+      console.log('🚫 Skipping parent notification during sync');
     }
   }, [nodes, edges, onWorkflowChange]);
 
@@ -468,38 +471,48 @@ function WorkflowBuilderInner({
 
   // Sync internal state with initialNodes/initialEdges when they change (but prevent infinite loop)
   useEffect(() => {
+    console.log('🔍 Sync check - initialNodes:', initialNodes.length, 'initialEdges:', initialEdges.length);
+    console.log('🔍 Current state - nodes:', nodes.length, 'edges:', edges.length);
+    console.log('🔍 Previous - nodes:', prevInitialNodesRef.current.length, 'edges:', prevInitialEdgesRef.current.length);
+
     const nodesChanged = JSON.stringify(initialNodes) !== JSON.stringify(prevInitialNodesRef.current);
     const edgesChanged = JSON.stringify(initialEdges) !== JSON.stringify(prevInitialEdgesRef.current);
 
+    console.log('🔍 Changed? Nodes:', nodesChanged, 'Edges:', edgesChanged);
+
+    // IMPORTANT: Don't sync if initialNodes is empty but we already have nodes
+    // This prevents React Strict Mode double-render from wiping the workflow
+    if (initialNodes.length === 0 && nodes.length > 0) {
+      console.log('🚫 Rejecting empty initialNodes sync - would wipe existing workflow!');
+      return;
+    }
+
     if (nodesChanged || edgesChanged) {
-      console.log('📥 Syncing with new initial workflow - Nodes:', initialNodes.length, '| Edges:', initialEdges.length);
-      
+      console.log('📥 SYNCING with new initial workflow - Nodes:', initialNodes.length, '| Edges:', initialEdges.length);
+
       // Set sync flag to prevent triggering onWorkflowChange during sync
       isSyncingRef.current = true;
-      
+
       // Restore nodes with icons and handlers
       const restoredNodes = initialNodes.map(node => restoreNodeData(node));
-      
+      console.log('✅ Restored', restoredNodes.length, 'nodes with icons/handlers');
+
       setNodes(restoredNodes);
       setEdges(initialEdges);
-      
+
       // Update refs
       prevInitialNodesRef.current = initialNodes;
       prevInitialEdgesRef.current = initialEdges;
-      
-      // Reset flag after sync completes
-      setTimeout(() => {
-        isSyncingRef.current = false;
-      }, 0);
-    }
-  }, [initialNodes, initialEdges, setNodes, setEdges, restoreNodeData]);
 
-  // Update existing nodes with handlers and restore icons
-  useEffect(() => {
-    setNodes((nds) =>
-      nds.map((node) => restoreNodeData(node))
-    );
-  }, [restoreNodeData, setNodes]);
+      // Reset flag after ALL React updates complete (use longer timeout)
+      setTimeout(() => {
+        console.log('🏁 Sync complete, re-enabling parent notifications');
+        isSyncingRef.current = false;
+      }, 100);
+    } else {
+      console.log('⏭️ No sync needed - workflow unchanged');
+    }
+  }, [initialNodes, initialEdges, nodes.length, setNodes, setEdges, restoreNodeData]);
 
   const addBlock = (
     blockType: string, 
