@@ -1,10 +1,18 @@
 import OpenAI from 'openai';
 
-// Initialize OpenAI client - API key should be set in environment variable
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || '',
-  dangerouslyAllowBrowser: true // Note: In production, use a backend proxy
-});
+// Lazily initialize so a missing key doesn't crash module load
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: import.meta.env.VITE_OPENAI_API_KEY || 'missing-key',
+      dangerouslyAllowBrowser: true,
+    });
+  }
+  return _openai;
+}
+// keep backward-compat alias used in this file
+const openai = { chat: { completions: { create: (...args: Parameters<OpenAI['chat']['completions']['create']>) => getOpenAI().chat.completions.create(...args) } } };
 
 export interface SceneAnalysis {
   description: string;
