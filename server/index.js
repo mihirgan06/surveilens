@@ -306,20 +306,35 @@ app.post('/vapi/call', async (req, res) => {
       token: process.env.VAPI_PRIVATE_KEY,
     });
 
-    console.log(`📞 Using VAPI SDK with Riley assistant (proven to work)...`);
-    
-    // Make the call using Riley assistant (same as working VC-voice-agent)
+    console.log(`📞 Using VAPI SDK with inline assistant config...`);
+
+    // Build an inline assistant so this works on any VAPI account (no hardcoded assistantId required)
     const call = await vapi.calls.create({
       type: 'outboundPhoneCall',
       phoneNumberId: process.env.VAPI_PHONE_NUMBER_ID,
       customer: {
         number: phoneNumber,
       },
-      assistantId: '11182291-6fa9-46d2-8127-5a8b4536e00e', // Riley assistant (new VAPI account)
-      // Override Riley's default message with custom surveillance alert
-      assistantOverrides: {
-        firstMessage: message
-      }
+      assistant: {
+        name: 'SurveiLens Alert Bot',
+        firstMessage: message,
+        model: {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are SurveiLens, an AI surveillance alert system. You are calling to notify the recipient about a security event detected on their property. Be concise, calm, and clear. After delivering the alert, ask if they want you to contact emergency services. Keep responses under 2 sentences.',
+            },
+          ],
+        },
+        voice: {
+          provider: '11labs',
+          voiceId: voiceId || 'rachel',
+        },
+        firstMessageMode: 'assistant-speaks-first',
+      },
     });
     
     // Update rate limit tracker
