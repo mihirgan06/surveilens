@@ -387,10 +387,25 @@ function WorkflowBuilderInner({
     if (blockType === 'gmail') {
       console.log('📧 Opening Gmail config');
       setGmailConfigNodeId(nodeId);
-      setGmailConfig(config || { to: '', subject: '', body: '', authenticated: false });
-      console.log('🚀 Setting showGmailConfig to TRUE');
+      const initialConfig = config || { to: '', subject: '', body: '', authenticated: false };
+      setGmailConfig(initialConfig);
       setShowGmailConfig(true);
-      console.log('✨ showGmailConfig should now be true');
+
+      // Verify with the backend that we still have valid tokens for this node.
+      // If backend was restarted and lost them, flip the UI back to "Sign in"
+      // so the user can re-authenticate without deleting the block.
+      if (initialConfig.authenticated) {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+        fetch(`${backendUrl}/gmail/status/${nodeId}`)
+          .then(res => res.json())
+          .then(data => {
+            if (!data.authenticated) {
+              console.warn('⚠️ Gmail tokens missing on server (likely restart). Forcing re-auth.');
+              setGmailConfig(prev => ({ ...prev, authenticated: false }));
+            }
+          })
+          .catch(err => console.error('❌ Gmail status check failed:', err));
+      }
     } else if (blockType === 'sms') {
       console.log('📱 Opening SMS config');
       setSmsConfigNodeId(nodeId);
@@ -618,6 +633,25 @@ function WorkflowBuilderInner({
     };
 
     setNodes((nds) => [...nds, newNode]);
+
+    // UX: auto-connect newly added ACTION blocks to the trigger node so they
+    // actually fire when the workflow runs. Without this, a freshly added
+    // action sits orphaned and silently never executes.
+    if (nodeType === 'action') {
+      const trigger = nodes.find((n) => n.data?.nodeType === 'trigger');
+      if (trigger) {
+        const newEdge: Edge = {
+          id: `edge_${trigger.id}_${newNode.id}_${Date.now()}`,
+          source: trigger.id,
+          target: newNode.id,
+          type: 'smoothstep',
+          animated: true,
+          style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '5,5' },
+        };
+        setEdges((eds) => [...eds, newEdge]);
+      }
+    }
+
     setShowBlockPanel(false);
   };
 
@@ -1039,8 +1073,13 @@ function WorkflowBuilderInner({
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-300">Authentication</label>
                 {gmailConfig.authenticated ? (
-                  <div className="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 text-sm text-center">
-                    ✓ Connected to Gmail
+                  <div className="flex gap-2">
+                    <div className="flex-1 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded text-green-400 text-sm text-center">
+                      ✓ Connected to Gmail
+                    </div>
+                    <Button onClick={handleGmailAuth} variant="ghost" size="sm" className="px-3" title="Re-authenticate (e.g. after backend restart)">
+                      Reconnect
+                    </Button>
                   </div>
                 ) : (
                   <Button onClick={handleGmailAuth} className="w-full" size="sm">

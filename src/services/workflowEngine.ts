@@ -509,25 +509,27 @@ Respond with ONLY "YES" or "NO".`;
     console.log('💬 Sending Slack message to channel:', channel);
     console.log('💬 Message content:', message);
 
-    try {
-      const response = await fetch(`${backendUrl}/slack/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nodeId: config.nodeId,
-          channel,
-          message
-        })
-      });
+    const response = await fetch(`${backendUrl}/slack/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nodeId: config.nodeId,
+        channel,
+        message
+      })
+    });
 
-      if (response.ok) {
-        console.log('💬 Slack message sent successfully');
-      } else {
-        console.error('❌ Failed to send Slack message:', await response.text());
-      }
-    } catch (error) {
-      console.error('❌ Slack error:', error);
+    const body = await response.json().catch(() => ({}));
+    if (response.ok && body.success) {
+      console.log(`💬 Slack message sent to ${channel}: "${message}"`);
+      return;
     }
+
+    // Surface the real Slack error up to executeWorkflow so the user sees
+    // it in the UI instead of having it silently swallowed.
+    const reason = body.error || `HTTP ${response.status}`;
+    console.error('❌ Slack send failed:', reason);
+    throw new Error(`Slack send failed: ${reason}`);
   }
 
   private async sendSMS(config: any, event: DetectionEvent): Promise<void> {

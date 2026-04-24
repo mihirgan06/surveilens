@@ -4,15 +4,28 @@ import { google } from 'googleapis';
 import twilio from 'twilio';
 import dotenv from 'dotenv';
 import { VapiClient } from '@vapi-ai/server-sdk';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local', override: true });
+
 
 const app = express();
 const PORT = 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Aggressive request logger so we can see EVERY inbound request in real time.
+app.use((req, _res, next) => {
+  const ts = new Date().toISOString();
+  console.log(`➡️  [${ts}] ${req.method} ${req.url}`);
+  next();
+});
 
 // OAuth2 Client
 const oauth2Client = new google.auth.OAuth2(
@@ -27,8 +40,30 @@ const twilioClient = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// Store user tokens for OAuth flows (Gmail)
-const userTokens = {};
+// Persist OAuth tokens to disk so they survive backend restarts.
+// Stored next to the server file in a gitignored JSON file.
+const TOKEN_STORE_PATH = path.join(__dirname, '.oauth-tokens.json');
+function loadTokens() {
+  try {
+    if (fs.existsSync(TOKEN_STORE_PATH)) {
+      const raw = fs.readFileSync(TOKEN_STORE_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      console.log('🔓 Loaded persisted OAuth tokens for', Object.keys(parsed).length, 'node(s)');
+      return parsed;
+    }
+  } catch (err) {
+    console.error('⚠️  Failed to load persisted tokens:', err.message);
+  }
+  return {};
+}
+function saveTokens() {
+  try {
+    fs.writeFileSync(TOKEN_STORE_PATH, JSON.stringify(userTokens, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('⚠️  Failed to persist tokens:', err.message);
+  }
+}
+const userTokens = loadTokens();
 
 // Rate limiting for VAPI calls to prevent spam
 const vapiCallHistory = new Map(); // phoneNumber -> lastCallTimestamp
@@ -62,9 +97,10 @@ app.get('/auth/google/callback', async (req, res) => {
   
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    
-    // Store tokens for this node
+
+    // Store tokens for this node + persist to disk so they survive restarts
     userTokens[nodeId] = tokens;
+    saveTokens();
     
     // Close window and notify parent
     res.send(`
@@ -182,43 +218,107 @@ app.post('/sms/send', async (req, res) => {
 
 // Slack Integration Endpoints
 // Send Slack message
+// Resolve a channel name like "#general" to its id ("C12345...") so we can
+// call conversations.join on it. Slack's chat.postMessage accepts the name
+// directly, but conversations.join requires the channel id.
+async function slackResolveChannelId(channelName) {
+  const cleaned = channelName.replace(/^#/, '');
+  // Look at the bot's known conversations first.
+  let cursor = '';
+  for (let i = 0; i < 5; i++) {
+    const url = new URL('https://slack.com/api/conversations.list');
+    url.searchParams.set('types', 'public_channel,private_channel');
+    url.searchParams.set('limit', '1000');
+    if (cursor) url.searchParams.set('cursor', cursor);
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+    });
+    const data = await r.json();
+    if (!data.ok) return null;
+    const hit = (data.channels || []).find((c) => c.name === cleaned);
+    if (hit) return hit.id;
+    cursor = data.response_metadata?.next_cursor;
+    if (!cursor) break;
+  }
+  return null;
+}
+
+async function postSlackMessage(slackMessage) {
+  const r = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(slackMessage),
+  });
+  return r.json();
+}
+
 app.post('/slack/send', async (req, res) => {
   const { nodeId, channel, message, blocks } = req.body;
-  
+
   console.log('💬 Slack send request received:');
   console.log('  NodeId:', nodeId);
   console.log('  Channel:', channel);
   console.log('  Message:', message);
-  
+
   if (!process.env.SLACK_BOT_TOKEN) {
     return res.status(401).json({ error: 'Slack bot token not configured' });
   }
-  
+
+  const targetChannel = channel || '#general';
+  const slackMessage = {
+    channel: targetChannel,
+    text: message,
+    ...(blocks && { blocks }),
+  };
+
   try {
-    const slackMessage = {
-      channel: channel || '#general',
-      text: message,
-      ...(blocks && { blocks })
-    };
-    
-    const response = await fetch('https://slack.com/api/chat.postMessage', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(slackMessage)
-    });
-    
-    const result = await response.json();
-    
-    if (result.ok) {
-      console.log('✅ Slack message sent successfully');
-      res.json({ success: true, message: 'Slack message sent successfully!', ts: result.ts });
-    } else {
-      console.error('❌ Slack API error:', result.error);
-      res.status(400).json({ error: `Slack API error: ${result.error}` });
+    let result = await postSlackMessage(slackMessage);
+
+    // Auto-recover from "bot not in channel" by joining and retrying once.
+    // chat.postMessage takes #name but conversations.join needs the id, so we
+    // resolve the id from conversations.list (requires channels:read scope).
+    if (!result.ok && result.error === 'not_in_channel') {
+      console.log(`⚠️ Bot is not in ${targetChannel} — attempting auto-join…`);
+      const channelId = await slackResolveChannelId(targetChannel);
+      if (!channelId) {
+        return res.status(400).json({
+          error: `Bot is not in ${targetChannel} and the channel could not be located. Either invite the bot with /invite @YourBot in ${targetChannel}, or pick a channel the bot already has access to.`,
+        });
+      }
+      const joinResp = await fetch('https://slack.com/api/conversations.join', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ channel: channelId }),
+      });
+      const joinJson = await joinResp.json();
+      if (!joinJson.ok) {
+        console.error('❌ conversations.join failed:', joinJson.error);
+        return res.status(400).json({
+          error: `Bot could not auto-join ${targetChannel} (${joinJson.error}). Run /invite @YourBot in ${targetChannel} in Slack, then retry.`,
+        });
+      }
+      console.log(`✅ Joined ${targetChannel} (${channelId}). Retrying postMessage…`);
+      result = await postSlackMessage({ ...slackMessage, channel: channelId });
     }
+
+    if (result.ok) {
+      console.log(`✅ Slack message sent to ${targetChannel}: "${message}"`);
+      return res.json({
+        success: true,
+        message: 'Slack message sent successfully!',
+        ts: result.ts,
+        channel: targetChannel,
+      });
+    }
+
+    console.error('❌ Slack API error:', result.error);
+    return res.status(400).json({ error: `Slack API error: ${result.error}` });
   } catch (error) {
     console.error('❌ Slack send error:', error);
     res.status(500).json({ error: 'Failed to send Slack message', details: error.message });
@@ -309,6 +409,31 @@ app.post('/vapi/call', async (req, res) => {
 
     console.log(`📞 Using VAPI SDK with inline assistant config...`);
 
+    // Map UI voice ids to VAPI's currently-active built-in voices.
+    // Active (post-2026 deprecation): Elliot, Rohan, Nico, Kai, Sagar, Godfrey,
+    // Neil (M); Savannah, Emma, Clara (F). The legacy set (Paige, Hana, Lily,
+    // Kylie, Cole, Harry, Spencer, Neha) was retired and rejects new assistants.
+    const VOICE_MAP = {
+      // Female
+      rachel:    { provider: 'vapi', voiceId: 'Clara' },
+      domi:      { provider: 'vapi', voiceId: 'Savannah' },
+      bella:     { provider: 'vapi', voiceId: 'Emma' },
+      elli:      { provider: 'vapi', voiceId: 'Emma' },
+      charlotte: { provider: 'vapi', voiceId: 'Clara' },
+      jessica:   { provider: 'vapi', voiceId: 'Emma' },
+      // Male
+      antoni:    { provider: 'vapi', voiceId: 'Elliot' },
+      josh:      { provider: 'vapi', voiceId: 'Kai' },
+      arnold:    { provider: 'vapi', voiceId: 'Neil' },
+      adam:      { provider: 'vapi', voiceId: 'Kai' },
+      sam:       { provider: 'vapi', voiceId: 'Nico' },
+      clyde:     { provider: 'vapi', voiceId: 'Kai' },
+      callum:    { provider: 'vapi', voiceId: 'Sagar' },
+      patrick:   { provider: 'vapi', voiceId: 'Godfrey' },
+    };
+    const resolvedVoice = VOICE_MAP[voiceId] || { provider: 'vapi', voiceId: 'Clara' };
+    console.log(`🔊 Voice resolution: ${voiceId} -> ${resolvedVoice.provider}/${resolvedVoice.voiceId}`);
+
     // Build an inline assistant so this works on any VAPI account (no hardcoded assistantId required)
     const call = await vapi.calls.create({
       type: 'outboundPhoneCall',
@@ -316,9 +441,14 @@ app.post('/vapi/call', async (req, res) => {
       customer: {
         number: phoneNumber,
       },
+      // System prompt is derived from the caller's own script so the AI stays
+      // in character after delivering the first line. The user's script is
+      // treated as the source of truth — we do NOT inject any surveillance /
+      // security framing unless their script says so.
       assistant: {
         name: 'SurveiLens Alert Bot',
         firstMessage: message,
+        firstMessageMode: 'assistant-speaks-first',
         model: {
           provider: 'openai',
           model: 'gpt-4o-mini',
@@ -326,15 +456,25 @@ app.post('/vapi/call', async (req, res) => {
             {
               role: 'system',
               content:
-                'You are SurveiLens, an AI surveillance alert system. You are calling to notify the recipient about a security event detected on their property. Be concise, calm, and clear. After delivering the alert, ask if they want you to contact emergency services. Keep responses under 2 sentences.',
+                'You are an AI voice agent placing an outbound phone call. Your opening line (already delivered) was:\n\n' +
+                `"${message}"\n\n` +
+                'Stay fully in character with that opening line. Match its tone, persona, and subject matter. If the opening line introduces you as a specific person or role (e.g. a delivery driver, a receptionist, an alert bot), you ARE that person. Keep every reply to 1-2 short sentences. Be natural and conversational. If the user says goodbye, bye, or indicates they are done, politely end the call. Do not mention that you are an AI unless directly asked.',
             },
           ],
         },
-        voice: {
-          provider: '11labs',
-          voiceId: voiceId || 'rachel',
+        voice: resolvedVoice,
+        // CRITICAL: without a transcriber the call connects, plays nothing, and
+        // immediately hangs up because VAPI has no way to listen for replies.
+        transcriber: {
+          provider: 'deepgram',
+          model: 'nova-2',
+          language: 'en',
         },
-        firstMessageMode: 'assistant-speaks-first',
+        // Resilience: don't sit on a dead line forever, end on natural goodbyes
+        silenceTimeoutSeconds: 30,
+        maxDurationSeconds: 300,
+        endCallPhrases: ['goodbye', 'bye', 'thanks bye', 'have a good day'],
+        backgroundSound: 'off',
       },
     });
     
@@ -353,24 +493,28 @@ app.post('/vapi/call', async (req, res) => {
     
   } catch (error) {
     console.error('❌ VAPI call error:', error);
-    
+    console.error('  statusCode:', error.statusCode);
+    console.error('  message:', error.message);
+    console.error('  body:', JSON.stringify(error.body, null, 2));
+    console.error('  rawResponse:', error.rawResponse);
+
     // Handle specific VAPI SDK errors
     if (error.statusCode === 400) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Bad request - check phone number format or configuration',
-        details: error.body || error.message 
+        details: error.body || error.message
       });
     }
-    
+
     if (error.statusCode === 401) {
-      return res.status(401).json({ 
-        error: 'Unauthorized - check VAPI credentials' 
+      return res.status(401).json({
+        error: 'Unauthorized - check VAPI credentials'
       });
     }
-    
-    res.status(500).json({ 
-      error: 'Failed to initiate call', 
-      details: error.message || String(error) 
+
+    res.status(500).json({
+      error: 'Failed to initiate call',
+      details: error.body || error.message || String(error)
     });
   }
 });
