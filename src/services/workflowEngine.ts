@@ -2,6 +2,15 @@ import type { Node, Edge } from 'reactflow';
 import type { DetectionEvent, SceneContext } from '../types/detectionTypes';
 import OpenAI from 'openai';
 
+const DEFAULT_SLACK_TEMPLATE = [
+  '[Surveilens] Security issue detected',
+  'Issue: {{event_type}}',
+  'Details: {{event_description}}',
+  'Time: {{timestamp}}',
+  'Confidence: {{confidence}}',
+  'Action: Please investigate as soon as possible.'
+].join('\n');
+
 const openai = new OpenAI({
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
   dangerouslyAllowBrowser: true
@@ -492,14 +501,16 @@ Respond with ONLY "YES" or "NO".`;
       return;
     }
 
-    const message = this.replaceVariables(config.message, event);
+    const messageTemplate = config.message?.trim() || DEFAULT_SLACK_TEMPLATE;
+    const message = this.replaceVariables(messageTemplate, event);
     const channel = config.channel;
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
     console.log('💬 Sending Slack message to channel:', channel);
     console.log('💬 Message content:', message);
 
     try {
-      const response = await fetch('http://localhost:3001/slack/send', {
+      const response = await fetch(`${backendUrl}/slack/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -635,8 +646,13 @@ Respond with ONLY "YES" or "NO".`;
    * Replace variables in templates
    */
   private replaceVariables(template: string, event: DetectionEvent): string {
+    const formattedEventType = event.type
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+
     return template
-      .replace(/\{\{event_type\}\}/g, event.type)
+      .replace(/\{\{event_type\}\}/g, formattedEventType)
       .replace(/\{\{event_description\}\}/g, event.description)
       .replace(/\{\{timestamp\}\}/g, new Date(event.timestamp).toLocaleString())
       .replace(/\{\{confidence\}\}/g, (event.confidence * 100).toFixed(0) + '%');
@@ -659,5 +675,4 @@ Respond with ONLY "YES" or "NO".`;
 }
 
 export const workflowEngine = new WorkflowEngine();
-
 

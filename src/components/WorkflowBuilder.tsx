@@ -21,6 +21,15 @@ import { Badge } from './ui/badge';
 import { Plus, Trash2, Workflow as WorkflowIcon, Zap, Send, Mail, MessageCircle, Phone, Webhook, Database, Camera, Settings, Clock, MapPin, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+const DEFAULT_SLACK_MESSAGE = [
+  '[Surveilens] Security issue detected',
+  'Issue: {{event_type}}',
+  'Details: {{event_description}}',
+  'Time: {{timestamp}}',
+  'Confidence: {{confidence}}',
+  'Action: Please investigate as soon as possible.'
+].join('\n');
+
 // Custom Node Component with side handles, settings, and delete button
 function CustomNode({ data, id }: { data: any; id: string }) {
   const isExecuting = data.isExecuting || false;
@@ -180,7 +189,7 @@ function WorkflowBuilderInner({
   const [slackConfigNodeId, setSlackConfigNodeId] = useState<string>('');
   const [slackConfig, setSlackConfig] = useState({
     channel: '',
-    message: '',
+    message: DEFAULT_SLACK_MESSAGE,
     configured: false
   });
   const [showCustomEventConfig, setShowCustomEventConfig] = useState(false);
@@ -409,7 +418,7 @@ function WorkflowBuilderInner({
     } else if (blockType === 'slack') {
       console.log('💬 Opening Slack config');
       setSlackConfigNodeId(nodeId);
-      setSlackConfig(config || { channel: '', message: '', configured: false });
+      setSlackConfig(config || { channel: '', message: DEFAULT_SLACK_MESSAGE, configured: false });
       setShowSlackConfig(true);
     } else if (blockType === 'custom_event') {
       console.log('🎯 Opening Custom Event config');
@@ -1632,7 +1641,7 @@ function WorkflowBuilderInner({
                 type="text"
                 value={slackConfig.channel}
                 onChange={(e) => setSlackConfig({ ...slackConfig, channel: e.target.value })}
-                placeholder="#general or #alerts"
+                placeholder="#all-palantir4delis or #alerts"
                 className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
               />
             </div>
@@ -1643,8 +1652,8 @@ function WorkflowBuilderInner({
               <textarea
                 value={slackConfig.message}
                 onChange={(e) => setSlackConfig({ ...slackConfig, message: e.target.value })}
-                placeholder="🚨 SURVEILLANCE ALERT: {{event_type}}&#10;📝 Description: {{event_description}}&#10;⏰ Time: {{timestamp}}&#10;🎯 Confidence: {{confidence}}"
-                rows={4}
+                placeholder={DEFAULT_SLACK_MESSAGE}
+                rows={6}
                 className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500 resize-none"
               />
               <div className="text-xs text-slate-400">

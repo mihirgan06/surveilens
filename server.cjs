@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const { google } = require('googleapis');
-require('dotenv').config({ path: '.env.local' });
+require('dotenv').config({ path: '.env' });
+require('dotenv').config({ path: '.env.local', override: true });
 
 const app = express();
 app.use(cors());
@@ -127,4 +128,3 @@ const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`🚀 OAuth server running on http://localhost:${PORT}`);
 });
-

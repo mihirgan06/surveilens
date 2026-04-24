@@ -5,7 +5,8 @@ import twilio from 'twilio';
 import dotenv from 'dotenv';
 import { VapiClient } from '@vapi-ai/server-sdk';
 
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 
 const app = express();
 const PORT = 3001;
@@ -416,4 +417,3 @@ app.get('/vapi/voices', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on http://localhost:${PORT}`);
 });
-
