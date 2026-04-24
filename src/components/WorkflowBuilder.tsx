@@ -633,25 +633,6 @@ function WorkflowBuilderInner({
     };
 
     setNodes((nds) => [...nds, newNode]);
-
-    // UX: auto-connect newly added ACTION blocks to the trigger node so they
-    // actually fire when the workflow runs. Without this, a freshly added
-    // action sits orphaned and silently never executes.
-    if (nodeType === 'action') {
-      const trigger = nodes.find((n) => n.data?.nodeType === 'trigger');
-      if (trigger) {
-        const newEdge: Edge = {
-          id: `edge_${trigger.id}_${newNode.id}_${Date.now()}`,
-          source: trigger.id,
-          target: newNode.id,
-          type: 'smoothstep',
-          animated: true,
-          style: { stroke: '#94a3b8', strokeWidth: 2, strokeDasharray: '5,5' },
-        };
-        setEdges((eds) => [...eds, newEdge]);
-      }
-    }
-
     setShowBlockPanel(false);
   };
 
